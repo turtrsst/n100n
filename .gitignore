@@ -1,10 +1,13 @@
-# Rahasia — jangan pernah di-commit
+# Rahasia
 .env
+
+# Data runtime
+data/
+files/
 
 # Backup & lokal
 *.tgz
 backup-*.tgz
-files/
 node_modules/
 
 # OS
