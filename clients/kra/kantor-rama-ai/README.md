@@ -7,27 +7,46 @@ tertentu — Anda pakai endpoint antrean tugas ini dari alur apa pun yang Anda r
 
 | File | Tujuan di repo KRA |
 |---|---|
+| `pasang.js` | **Pemasang otomatis** (disarankan): menyalin file + menyisipkan require/action ke `api/index.php`, idempoten |
 | `api/lib/KraN100nClient.php` | klien HTTP KRA → n100n (status, run, runAsync, waitExecution, webhook) |
 | `api/lib/KraFlowBridge.php` | antrean tugas + kategori: terima tugas, daftar hasil, tandai selesai |
 | `tools/flow-bridge-test.php` | uji KraFlowBridge tanpa web server/MySQL |
 | `docs/n100n-integration.md` | dokumentasi integrasi |
-| `patches/0001-n100n-flow-bridge.patch` | patch `api/index.php` + file di atas sekaligus |
+| `snippets/aksi-n100n.php` | potongan action yang disisipkan `pasang.js` |
+| `patches/0001-n100n-flow-bridge.patch` | patch siap-apply untuk branch **main** |
+| `patches/0001-flow-bridge-kra-049ded0b.patch` | patch siap-apply untuk branch `arena/049ded0b-kantor-rama-ai` |
 
 ## Cara pasang
 
-### Opsi A — pakai patch (disarankan)
+### Opsi A — pemasang otomatis (disarankan, tahan beda branch)
 
 ```bash
-# di folder proyek KRA, pastikan working tree bersih
-git apply --check /path/ke/0001-n100n-flow-bridge.patch   # cek dulu
-git apply /path/ke/0001-n100n-flow-bridge.patch
+# dari folder mana pun; Node dipakai karena n100n memang butuh Node
+node pasang.js "C:\xampp\htdocs\kantor-rama-ai" --check   # lihat rencana
+node pasang.js "C:\xampp\htdocs\kantor-rama-ai"           # terapkan
 ```
 
-Patch menambahkan 2 `require_once`, 8 action baru (`flow-tugas`, `flow-selesai`,
-`flow-kategori`, `flow-status`, `n100n-status`, `n100n-workflows`, `n100n-run`,
-`n100n-execution`), dan memperbarui daftar action di pesan 404.
+Aman dijalankan berulang: yang sudah ada dilewati. Yang diubah di `api/index.php`
+hanya tiga hal — 2 `require_once`, blok 8 action, dan daftar action di pesan 404 —
+dan `api/index.php.bak-n100n` dibuat sebagai cadangan.
 
-### Opsi B — copy manual
+### Opsi B — pakai patch
+
+```bash
+git apply --check /path/ke/0001-flow-bridge-kra-049ded0b.patch   # branch 049ded0b
+# atau, untuk branch main:
+git apply --check /path/ke/0001-n100n-flow-bridge.patch
+```
+
+Patch konteks terikat ke versi `api/index.php` saat dibuat. Kalau branch Anda
+sudah berubah lagi, pakai `pasang.js` (Opsi A) — ia mencari titik sisip sendiri.
+
+Kedua cara menambahkan 2 `require_once`, 8 action baru (`flow-tugas`,
+`flow-selesai`, `flow-kategori`, `flow-status`, `n100n-status`,
+`n100n-workflows`, `n100n-run`, `n100n-execution`), dan memperbarui daftar action
+di pesan 404.
+
+### Opsi C — copy manual
 
 1. Copy `api/lib/KraN100nClient.php` dan `api/lib/KraFlowBridge.php` ke `api/lib/` KRA.
 2. Copy `tools/flow-bridge-test.php` ke `tools/`.

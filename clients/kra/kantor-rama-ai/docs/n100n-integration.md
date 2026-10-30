@@ -7,6 +7,20 @@ HTTP, sheet), lalu KRA memicunya. Dua arah yang tersedia:
 - **KRA → n100n**: jalankan workflow lewat API key atau webhook.
 - **n100n → KRA**: workflow menitipkan tugas ke antrean KRA (`KraFlowBridge`).
 
+## 0. Memasang ke repo KRA
+
+Dari folder paket `clients/kra/kantor-rama-ai`:
+
+```bash
+node pasang.js "C:\xampp\htdocs\kantor-rama-ai" --check   # periksa dulu
+node pasang.js "C:\xampp\htdocs\kantor-rama-ai"           # terapkan
+```
+
+Skrip ini menyalin 4 berkas dan menyisipkan 2 `require_once` + 8 action ke
+`api/index.php` (idempoten, membuat `api/index.php.bak-n100n`). Alternatif:
+`git apply patches/0001-flow-bridge-kra-049ded0b.patch` (branch 049ded0b) atau
+`patches/0001-n100n-flow-bridge.patch` (main).
+
 ## 1. Konfigurasi
 
 Tambahkan ke environment KRA (XAMPP: wrapper Apache/`setprop`, atau `.env` bila ada):
