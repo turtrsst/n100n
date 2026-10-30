@@ -225,6 +225,18 @@ test('error workflow dipanggil saat workflow utama gagal', async () => {
   assert.strictEqual(execs[0].trigger, 'error');
 });
 
+test('delay/wait: ms, seconds, dan default 1 detik', async () => {
+  const r = baseRun();
+  const t0 = Date.now();
+  await runNode(r, { id: 'd', type: 'delay', name: 'd', config: { seconds: 0.05 } }, [{}]);
+  const lama = Date.now() - t0;
+  assert.ok(lama >= 40 && lama < 400, 'seconds 0.05 -> ~50ms, dapat ' + lama);
+
+  const t1 = Date.now();
+  await runNode(r, { id: 'd2', type: 'delay', name: 'd2', config: {} }, [{}]);
+  assert.ok(Date.now() - t1 >= 900, 'tanpa config -> default 1000ms');
+});
+
 test('registry node lengkap', () => {
   for (const t of ['manual', 'webhook', 'schedule', 'noop', 'set', 'code', 'log', 'if', 'ifElse', 'switch',
     'delay', 'wait', 'stop', 'respond', 'workflow', 'http', 'telegram', 'file', 'sheet']) {
