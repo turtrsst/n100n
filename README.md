@@ -6,8 +6,11 @@ Tanpa Docker, tanpa `npm install`. Menjalankan workflow bergaya n8n — termasuk
 
 Versi 1.1: engine sudah berbasis **graf** (node + `next`), jadi alur seperti
 `Workflow WOWO` (kirim tugas → tunggu → cek hasil → ulang) bisa dijalankan.
-Lihat [`docs/WOWO-WORKFLOW.md`](docs/WOWO-WORKFLOW.md) dan
-[`docs/KRA-INTEGRATION.md`](docs/KRA-INTEGRATION.md).
+
+- [`docs/WOWO-WORKFLOW.md`](docs/WOWO-WORKFLOW.md) — pemetaan 1:1 dari screenshot n8n.
+- [`docs/KRA-INTEGRATION.md`](docs/KRA-INTEGRATION.md) — kontrak dua arah dengan kantor-rama-ai.
+- [`clients/kra/kantor-rama-ai`](clients/kra/kantor-rama-ai) — kelas PHP + patch siap
+  tempel di repo KRA (`git apply patches/0001-n100n-wowo-integration.patch`).
 
 ## Jalankan
 

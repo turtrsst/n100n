@@ -1,0 +1,929 @@
+diff --git a/api/index.php b/api/index.php
+index 29fa688..c4be656 100644
+--- a/api/index.php
++++ b/api/index.php
+@@ -24,6 +24,8 @@ require_once __DIR__ . '/lib/KraSemanticMemory.php';
+ require_once __DIR__ . '/lib/KraDatasetEngine.php';
+ require_once __DIR__ . '/lib/KraVisionEngine.php';
+ require_once __DIR__ . '/lib/KraWorkflowEngine.php';
++require_once __DIR__ . '/lib/KraN100nClient.php';
++require_once __DIR__ . '/lib/KraWowoBridge.php';
+ require_once __DIR__ . '/ProviderConfig.php';
+ 
+ function getProjectRoot(): string
+@@ -469,10 +471,129 @@ try {
+         ]);
+     }
+ 
++    // ---------------- integrasi n100n (Workflow WOWO) ----------------
++    if ($action === 'wowo-pilar') {
++        respond([
++            'ok' => true,
++            'pilar' => KraWowoBridge::pilarKonten(),
++            'diambil' => gmdate('c'),
++        ]);
++    }
++
++    if ($action === 'wowo-tugas') {
++        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
++            $payload = json_decode((string) file_get_contents('php://input'), true) ?: $_POST;
++            $hasil = KraWowoBridge::terimaTugas(is_array($payload) ? $payload : []);
++            respond($hasil, ($hasil['ok'] ?? false) ? 202 : 400);
++        }
++        $status = isset($_GET['status']) ? (string) $_GET['status'] : null;
++        $limit = (int) ($_GET['limit'] ?? 50);
++        $items = KraWowoBridge::daftarTugas($status, $limit);
++        respond([
++            'ok' => true,
++            'items' => $items,
++            'jumlah' => count($items),
++            'ringkasan' => KraWowoBridge::ringkasan(),
++        ]);
++    }
++
++    if ($action === 'wowo-selesai') {
++        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
++            respond(['ok' => false, 'error' => 'wowo-selesai requires POST.'], 405);
++        }
++        $payload = json_decode((string) file_get_contents('php://input'), true) ?: $_POST;
++        $hasil = KraWowoBridge::selesaikan(
++            (string) ($payload['task_id'] ?? ''),
++            (string) ($payload['ide'] ?? ''),
++            ['mode' => (string) ($payload['mode'] ?? 'manual')]
++        );
++        respond($hasil, ($hasil['ok'] ?? false) ? 200 : 400);
++    }
++
++    if ($action === 'n100n-status') {
++        respond(['ok' => true, 'n100n' => KraN100nClient::status(), 'wowo' => KraWowoBridge::ringkasan()]);
++    }
++
++    if ($action === 'n100n-workflows') {
++        if (!KraWowoBridge::isOperator()) {
++            respond(['ok' => false, 'error' => 'Butuh x-api-key atau login KRA.'], 401);
++        }
++        try {
++            $daftar = KraN100nClient::workflows();
++        } catch (Throwable $e) {
++            respond(['ok' => false, 'error' => $e->getMessage()], 502);
++        }
++        $ringkas = [];
++        foreach ($daftar as $wf) {
++            $ringkas[] = [
++                'id' => $wf['id'] ?? null,
++                'name' => $wf['name'] ?? '',
++                'active' => (bool) ($wf['active'] ?? false),
++                'trigger' => $wf['trigger'] ?? '',
++                'updated' => $wf['updated'] ?? null,
++            ];
++        }
++        respond(['ok' => true, 'workflows' => $ringkas]);
++    }
++
++    if ($action === 'n100n-run') {
++        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
++            respond(['ok' => false, 'error' => 'n100n-run requires POST.'], 405);
++        }
++        if (!KraWowoBridge::isOperator()) {
++            respond(['ok' => false, 'error' => 'Butuh x-api-key atau login KRA.'], 401);
++        }
++        $payload = json_decode((string) file_get_contents('php://input'), true) ?: $_POST;
++        $workflowId = (int) ($payload['workflow_id'] ?? $_GET['workflow_id'] ?? 0);
++        if ($workflowId <= 0) {
++            respond(['ok' => false, 'error' => 'workflow_id wajib diisi'], 400);
++        }
++        $items = $payload['items'] ?? [['schedule' => gmdate('c')]];
++        if (!is_array($items)) {
++            $items = [['schedule' => gmdate('c')]];
++        }
++        $mode = strtolower((string) ($payload['mode'] ?? $_GET['mode'] ?? 'async'));
++        try {
++            if ($mode === 'sync') {
++                $hasil = KraN100nClient::run($workflowId, $items, (int) ($payload['timeout'] ?? 120));
++                respond($hasil);
++            }
++            $mulai = KraN100nClient::runAsync($workflowId, $items);
++            $executionId = (int) ($mulai['execution_id'] ?? 0);
++            if ($executionId <= 0) {
++                respond(['ok' => false, 'error' => 'n100n tidak mengembalikan execution_id'], 502);
++            }
++            $tunggu = (bool) ($payload['wait'] ?? true);
++            if (!$tunggu) {
++                respond(['ok' => true, 'execution_id' => $executionId, 'status' => 'running']);
++            }
++            $detail = KraN100nClient::waitExecution($executionId, (int) ($payload['timeout'] ?? 600));
++            respond(['ok' => ($detail['status'] ?? '') === 'success', 'execution' => $detail]);
++        } catch (Throwable $e) {
++            respond(['ok' => false, 'error' => $e->getMessage()], 502);
++        }
++    }
++
++    if ($action === 'n100n-execution') {
++        if (!KraWowoBridge::isOperator()) {
++            respond(['ok' => false, 'error' => 'Butuh x-api-key atau login KRA.'], 401);
++        }
++        $id = (int) ($_GET['id'] ?? 0);
++        if ($id <= 0) {
++            respond(['ok' => false, 'error' => 'id eksekusi wajib diisi'], 400);
++        }
++        try {
++            respond(['ok' => true, 'execution' => KraN100nClient::execution($id)]);
++        } catch (Throwable $e) {
++            respond(['ok' => false, 'error' => $e->getMessage()], 502);
++        }
++    }
++
+     $available = 'status, agents, save-agent, hired-agents, log-chat, chat-history, '
+         . 'chat-agent, tasks, propose, model-propose, router-health, router-models, '
+         . 'approve, reject, presence, meeting-record, skills, skill-read, skill-hub, '
+-        . 'skill-toggle, providers, audit, templates.';
++        . 'skill-toggle, providers, audit, templates, '
++        . 'wowo-pilar, wowo-tugas, wowo-selesai, n100n-status, n100n-workflows, n100n-run, n100n-execution.';
+     respond([
+         'ok' => false,
+         'error' => 'Unknown action: ' . $action . '. Available: ' . $available,
+diff --git a/api/lib/KraN100nClient.php b/api/lib/KraN100nClient.php
+new file mode 100644
+index 0000000..3ad49ad
+--- /dev/null
++++ b/api/lib/KraN100nClient.php
+@@ -0,0 +1,212 @@
++<?php
++declare(strict_types=1);
++
++/**
++ * KraN100nClient — jembatan HTTP KRA -> n100n (engine automasi lokal n8n-like).
++ *
++ * Konfigurasi lewat environment (XAMPP: setprop atau .env pembungkus Apache):
++ *   KRA_N100N_URL     default http://127.0.0.1:5679
++ *   KRA_N100N_TOKEN   isi dengan APP_API_TOKEN dari .env n100n
++ *
++ * Contoh:
++ *   $status = KraN100nClient::status();                        // cek hidup
++ *   $exec   = KraN100nClient::runAsync(1, [['schedule' => gmdate('c')]]);
++ *   $hasil  = KraN100nClient::waitExecution((int) $exec['execution_id'], 600);
++ *
++ * Tidak memakai Composer; curl bila ada, kalau tidak ada jatuh ke PHP streams
++ * (pola yang sama dengan KraModelDispatcher).
++ */
++final class KraN100nClient
++{
++    public static function baseUrl(): string
++    {
++        $url = trim((string) (getenv('KRA_N100N_URL') ?: 'http://127.0.0.1:5679'));
++        return rtrim($url, '/');
++    }
++
++    public static function token(): string
++    {
++        return trim((string) getenv('KRA_N100N_TOKEN'));
++    }
++
++    public static function isConfigured(): bool
++    {
++        return self::token() !== '';
++    }
++
++    /** Ringkasan untuk dashboard: tidak pernah melempar exception. */
++    public static function status(): array
++    {
++        $info = [
++            'configured' => self::isConfigured(),
++            'baseUrl' => self::baseUrl(),
++            'ok' => false,
++        ];
++        if (!self::isConfigured()) {
++            $info['error'] = 'KRA_N100N_TOKEN belum diisi. Ambil dari APP_API_TOKEN di .env n100n.';
++            return $info;
++        }
++        try {
++            $health = self::health();
++            $info['ok'] = (bool) ($health['ok'] ?? false);
++            $info['health'] = $health;
++        } catch (Throwable $e) {
++            $info['error'] = $e->getMessage();
++        }
++        return $info;
++    }
++
++    public static function health(): array
++    {
++        return self::request('GET', '/api/health', null, 5);
++    }
++
++    public static function workflows(): array
++    {
++        return self::request('GET', '/api/workflows');
++    }
++
++    public static function workflow(int $id): array
++    {
++        return self::request('GET', '/api/workflows/' . $id);
++    }
++
++    /** Jalankan workflow dan tunggu sampai selesai (pakai untuk workflow pendek). */
++    public static function run(int $id, array $items = [[]], int $timeoutSeconds = 120): array
++    {
++        return self::request('POST', '/api/workflows/' . $id . '/run', ['items' => $items], $timeoutSeconds);
++    }
++
++    /** Jalankan di latar belakang; cocok untuk WOWO yang berisi node wait panjang. */
++    public static function runAsync(int $id, array $items = [[]]): array
++    {
++        return self::request('POST', '/api/workflows/' . $id . '/run?async=1', ['items' => $items], 15);
++    }
++
++    public static function execution(int $id, int $timeoutSeconds = 30): array
++    {
++        return self::request('GET', '/api/executions/' . $id, null, $timeoutSeconds);
++    }
++
++    /** Poll sampai status bukan "running" lagi (atau timeout). */
++    public static function waitExecution(int $id, int $timeoutSeconds = 300, int $intervalMs = 1500): array
++    {
++        $deadline = time() + max(1, $timeoutSeconds);
++        $last = [];
++        while (time() < $deadline) {
++            $last = self::execution($id);
++            if (($last['status'] ?? 'running') !== 'running') {
++                return $last;
++            }
++            usleep(max(200, $intervalMs) * 1000);
++        }
++        $last['timeout'] = true;
++        return $last;
++    }
++
++    /** Panggil webhook n100n (workflow trigger webhook yang aktif). */
++    public static function webhook(string $path, array $payload = [], bool $wait = false, ?string $webhookToken = null): array
++    {
++        $query = [];
++        if ($wait) {
++            $query[] = 'wait=1';
++        }
++        if ($webhookToken !== null && $webhookToken !== '') {
++            $query[] = 'token=' . rawurlencode($webhookToken);
++        }
++        $suffix = $query === [] ? '' : '?' . implode('&', $query);
++        return self::request('POST', '/webhook/' . ltrim($path, '/') . $suffix, $payload);
++    }
++
++    private static function request(string $method, string $path, ?array $body = null, int $timeoutSeconds = 30, int $retry = 1): array
++    {
++        if (!self::isConfigured()) {
++            throw new RuntimeException('KRA_N100N_TOKEN belum diisi. Ambil dari APP_API_TOKEN di .env n100n.');
++        }
++        $url = self::baseUrl() . $path;
++        $payload = $body === null ? null : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
++        $headers = [
++            'Content-Type: application/json',
++            'Accept: application/json',
++            'x-api-key: ' . self::token(),
++        ];
++
++        $lastError = null;
++        for ($attempt = 0; $attempt <= $retry; $attempt++) {
++            [$status, $raw] = self::http($method, $url, $headers, $payload, $timeoutSeconds);
++            $data = json_decode($raw, true);
++            if ($status >= 200 && $status < 300) {
++                return is_array($data) ? $data : ['ok' => true, 'raw' => $raw];
++            }
++            $message = is_array($data) && isset($data['error'])
++                ? (string) $data['error']
++                : substr($raw, 0, 300);
++            $lastError = new RuntimeException('n100n membalas HTTP ' . $status . ': ' . $message);
++            if ($status < 500 && $status !== 429) {
++                break;
++            }
++            if ($attempt < $retry) {
++                usleep(250000 * ($attempt + 1));
++            }
++        }
++        throw $lastError ?? new RuntimeException('Permintaan ke n100n gagal tanpa keterangan.');
++    }
++
++    /** @return array{0:int,1:string} [status, body mentah] */
++    private static function http(string $method, string $url, array $headers, ?string $payload, int $timeoutSeconds): array
++    {
++        if (function_exists('curl_init')) {
++            $ch = curl_init($url);
++            if ($ch !== false) {
++                $options = [
++                    CURLOPT_CUSTOMREQUEST => $method,
++                    CURLOPT_RETURNTRANSFER => true,
++                    CURLOPT_HTTPHEADER => $headers,
++                    CURLOPT_TIMEOUT => max(1, $timeoutSeconds),
++                    CURLOPT_CONNECTTIMEOUT => 10,
++                ];
++                if ($payload !== null) {
++                    $options[CURLOPT_POSTFIELDS] = $payload;
++                }
++                curl_setopt_array($ch, $options);
++                $raw = curl_exec($ch);
++                $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
++                $error = curl_error($ch);
++                curl_close($ch);
++                if ($raw === false) {
++                    throw new RuntimeException(
++                        'n100n tidak bisa dihubungi di ' . self::baseUrl() . ': ' . ($error !== '' ? $error : 'koneksi gagal')
++                    );
++                }
++                return [$status, (string) $raw];
++            }
++        }
++
++        // Cadangan tanpa ekstensi curl (pola KraModelDispatcher).
++        $context = stream_context_create([
++            'http' => [
++                'method' => $method,
++                'header' => implode("\r\n", $headers) . "\r\n",
++                'content' => $payload ?? '',
++                'timeout' => max(1, $timeoutSeconds),
++                'ignore_errors' => true,
++            ],
++        ]);
++        $raw = @file_get_contents($url, false, $context);
++        if ($raw === false) {
++            $last = error_get_last();
++            $message = is_array($last) ? (string) ($last['message'] ?? '') : '';
++            throw new RuntimeException(
++                'n100n tidak bisa dihubungi di ' . self::baseUrl() . ': ' . ($message !== '' ? $message : 'koneksi gagal')
++            );
++        }
++        $status = 200;
++        $responseHeaders = $http_response_header ?? [];
++        foreach ($responseHeaders as $lines) {
++            if (preg_match('#^HTTP/\S+\s+(\d{3})#', (string) $lines, $match) === 1) {
++                $status = (int) $match[1];
++            }
++        }
++        return [$status, (string) $raw];
++    }
++}
+diff --git a/api/lib/KraWowoBridge.php b/api/lib/KraWowoBridge.php
+new file mode 100644
+index 0000000..ec22394
+--- /dev/null
++++ b/api/lib/KraWowoBridge.php
+@@ -0,0 +1,308 @@
++<?php
++declare(strict_types=1);
++
++/**
++ * KraWowoBridge — sisi KRA yang dipanggil Workflow WOWO (n100n).
++ *
++ * Endpoint (lihat api/index.php):
++ *   GET  ?action=wowo-pilar            -> daftar pilar konten
++ *   POST ?action=wowo-tugas            -> Wowo menerima tugas  (dipanggil n100n)
++ *   GET  ?action=wowo-tugas&status=... -> daftar tugas + ide
++ *   POST ?action=wowo-selesai          -> tandai selesai + isi ide (kalau manual)
++ *
++ * Penyimpanan: <project>/.temp/wowo.json (flock, tanpa MySQL) — mengikuti pola
++ * KraTaskEngine supaya tetap jalan walau MySQL XAMPP mati.
++ *
++ * Mode menghasilkan ide (env KRA_WOWO_MODE):
++ *   template (default) : ide contoh deterministik, alur langsung selesai — untuk uji
++ *   agent              : pakai KraAgentChat (model AI KRA), gagal -> template
++ *   manual             : biarkan "diproses" sampai ada POST wowo-selesai
++ *
++ * Generator kustom: KraWowoBridge::setGenerator(fn(array $tugas): string);
++ */
++final class KraWowoBridge
++{
++    private const DEFAULT_PILAR = [
++        ['id' => 1, 'nama' => 'Edukasi', 'deskripsi' => 'menjelaskan konsep ke pembaca awam'],
++        ['id' => 2, 'nama' => 'Studi Kasus', 'deskripsi' => 'cerita nyata dari lapangan'],
++        ['id' => 3, 'nama' => 'Tips Praktis', 'deskripsi' => 'langkah singkat yang bisa langsung dicoba'],
++        ['id' => 4, 'nama' => 'Opini', 'deskripsi' => 'sudut pandang penulis atas isu hangat'],
++    ];
++
++    /** @var callable|null */
++    private static $generator = null;
++
++    public static function setGenerator(?callable $generator): void
++    {
++        self::$generator = $generator;
++    }
++
++    // ---------------------------------------------------------------- storage
++    private static function tempDir(): string
++    {
++        $dir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.temp';
++        if (!is_dir($dir)) {
++            @mkdir($dir, 0777, true);
++        }
++        return $dir;
++    }
++
++    private static function storagePath(): string
++    {
++        return self::tempDir() . DIRECTORY_SEPARATOR . 'wowo.json';
++    }
++
++    private static function load(): array
++    {
++        $path = self::storagePath();
++        if (!is_file($path)) {
++            return ['counter' => 1000, 'tugas' => []];
++        }
++        $raw = (string) @file_get_contents($path);
++        $data = json_decode($raw, true);
++        if (!is_array($data)) {
++            return ['counter' => 1000, 'tugas' => []];
++        }
++        return [
++            'counter' => (int) ($data['counter'] ?? 1000),
++            'tugas' => is_array($data['tugas'] ?? null) ? $data['tugas'] : [],
++        ];
++    }
++
++    private static function save(array $data): void
++    {
++        $path = self::storagePath();
++        $handle = @fopen($path, 'c');
++        if ($handle === false) {
++            throw new RuntimeException('Tidak bisa menulis ' . $path);
++        }
++        try {
++            flock($handle, LOCK_EX);
++            ftruncate($handle, 0);
++            rewind($handle);
++            fwrite($handle, (string) json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
++            fflush($handle);
++        } finally {
++            flock($handle, LOCK_UN);
++            fclose($handle);
++        }
++    }
++
++    // -------------------------------------------------------------- pilar
++    public static function pilarKonten(): array
++    {
++        $file = trim((string) getenv('KRA_WOWO_PILAR_FILE'));
++        if ($file !== '' && is_file($file)) {
++            $data = json_decode((string) file_get_contents($file), true);
++            if (is_array($data)) {
++                $list = $data['pilar'] ?? $data;
++                if (is_array($list) && $list !== []) {
++                    return array_values($list);
++                }
++            }
++        }
++        return self::DEFAULT_PILAR;
++    }
++
++    // -------------------------------------------------------------- tugas
++    public static function terimaTugas(array $payload): array
++    {
++        if (!self::authorized()) {
++            return ['ok' => false, 'error' => 'x-api-key tidak cocok (set KRA_WOWO_API_KEY / KRA_API_KEY).'];
++        }
++        $prompt = trim((string) ($payload['prompt'] ?? ''));
++        if ($prompt === '') {
++            return ['ok' => false, 'error' => 'prompt wajib diisi'];
++        }
++
++        $data = self::load();
++        $id = 'T' . (int) (++$data['counter']);
++        $tugas = [
++            'task_id' => $id,
++            'agen' => trim((string) ($payload['agen'] ?? 'wowo')) ?: 'wowo',
++            'pilar' => trim((string) ($payload['pilar'] ?? 'Umum')) ?: 'Umum',
++            'judul' => trim((string) ($payload['judul'] ?? '')) ?: ('Konten ' . $id),
++            'prompt' => $prompt,
++            'gaya' => trim((string) ($payload['gaya'] ?? '')),
++            'jumlah_kata' => (int) ($payload['jumlah_kata'] ?? 300),
++            'status' => 'diproses',
++            'dibuat' => gmdate('c'),
++            'selesai' => null,
++            'ide' => null,
++            'mode' => null,
++        ];
++
++        $mode = self::mode();
++        if ($mode !== 'manual') {
++            $hasil = self::generateIde($tugas, $mode);
++            $tugas['ide'] = $hasil['ide'];
++            $tugas['mode'] = $hasil['mode'];
++            if (trim((string) $hasil['ide']) !== '') {
++                $tugas['status'] = 'selesai';
++                $tugas['selesai'] = gmdate('c');
++            }
++        }
++
++        $data['tugas'][$id] = $tugas;
++        self::save($data);
++
++        return [
++            'ok' => true,
++            'task_id' => $id,
++            'status' => $tugas['status'],
++            'diterima' => $tugas['dibuat'],
++        ];
++    }
++
++    public static function daftarTugas(?string $status = null, int $limit = 50): array
++    {
++        $data = self::load();
++        $items = array_values($data['tugas']);
++        if ($status !== null && $status !== '') {
++            $items = array_values(array_filter($items, static function (array $t) use ($status): bool {
++                return (string) ($t['status'] ?? '') === $status;
++            }));
++        }
++        usort($items, static function (array $a, array $b): int {
++            return strcmp((string) ($b['dibuat'] ?? ''), (string) ($a['dibuat'] ?? ''));
++        });
++        return array_slice($items, 0, max(1, $limit));
++    }
++
++    public static function tugas(string $id): ?array
++    {
++        $data = self::load();
++        return $data['tugas'][$id] ?? null;
++    }
++
++    public static function selesaikan(string $id, string $ide, array $meta = []): array
++    {
++        if (!self::authorized()) {
++            return ['ok' => false, 'error' => 'x-api-key tidak cocok (set KRA_WOWO_API_KEY / KRA_API_KEY).'];
++        }
++        $ide = trim($ide);
++        if ($ide === '') {
++            return ['ok' => false, 'error' => 'ide wajib diisi'];
++        }
++        $data = self::load();
++        if (!isset($data['tugas'][$id])) {
++            return ['ok' => false, 'error' => 'tugas tidak ditemukan: ' . $id];
++        }
++        $data['tugas'][$id] = array_merge($data['tugas'][$id], [
++            'ide' => $ide,
++            'status' => 'selesai',
++            'selesai' => gmdate('c'),
++            'mode' => (string) ($meta['mode'] ?? 'manual'),
++        ], is_array($meta) ? $meta : []);
++        self::save($data);
++        return ['ok' => true, 'tugas' => $data['tugas'][$id]];
++    }
++
++    public static function ringkasan(): array
++    {
++        $data = self::load();
++        $semua = array_values($data['tugas']);
++        $hitung = ['diproses' => 0, 'selesai' => 0];
++        foreach ($semua as $tugas) {
++            $status = (string) ($tugas['status'] ?? '');
++            if (isset($hitung[$status])) {
++                $hitung[$status]++;
++            }
++        }
++        return [
++            'total' => count($semua),
++            'diproses' => $hitung['diproses'],
++            'selesai' => $hitung['selesai'],
++            'mode' => self::mode(),
++            'storage' => self::storagePath(),
++            'terakhir' => $semua[0] ?? null,
++        ];
++    }
++
++    // -------------------------------------------------------------- akses
++    public static function authorized(): bool
++    {
++        $expected = self::apiKey();
++        if ($expected === '') {
++            return true; // lokal tanpa kunci: izinkan (n100n juga tanpa token bila APP_API_TOKEN kosong)
++        }
++        $given = trim((string) ($_SERVER['HTTP_X_API_KEY'] ?? ''));
++        return $given !== '' && hash_equals($expected, $given);
++    }
++
++    /** Aksi admin (n100n-run dll): API key ATAU login KRA. */
++    public static function isOperator(): bool
++    {
++        if (self::apiKey() !== '' && self::authorized()) {
++            return true;
++        }
++        if (self::apiKey() === '') {
++            return true;
++        }
++        if (class_exists('KraAuth')) {
++            try {
++                return KraAuth::authenticate() !== null;
++            } catch (Throwable $e) {
++                return false;
++            }
++        }
++        return false;
++    }
++
++    private static function apiKey(): string
++    {
++        return trim((string) (getenv('KRA_WOWO_API_KEY') ?: getenv('KRA_API_KEY') ?: ''));
++    }
++
++    private static function mode(): string
++    {
++        $mode = strtolower(trim((string) (getenv('KRA_WOWO_MODE') ?: 'template')));
++        return in_array($mode, ['template', 'agent', 'manual'], true) ? $mode : 'template';
++    }
++
++    // ---------------------------------------------------------- generator
++    private static function generateIde(array $tugas, string $mode): array
++    {
++        if (is_callable(self::$generator)) {
++            try {
++                $ide = trim((string) call_user_func(self::$generator, $tugas));
++                if ($ide !== '') {
++                    return ['ide' => $ide, 'mode' => 'custom'];
++                }
++            } catch (Throwable $e) {
++                // lanjut ke mode bawaan
++            }
++        }
++
++        if ($mode === 'agent' && class_exists('KraAgentChat')) {
++            try {
++                $agentId = trim((string) (getenv('KRA_WOWO_AGENT') ?: 'rama'));
++                $reply = KraAgentChat::dispatch([
++                    'channel' => 'wowo',
++                    'agentId' => $agentId,
++                    'message' => (string) ($tugas['prompt'] ?? ''),
++                ]);
++                $isi = trim((string) ($reply['message'] ?? ''));
++                if ($isi !== '') {
++                    return ['ide' => $isi, 'mode' => 'agent'];
++                }
++            } catch (Throwable $e) {
++                // jatuh ke template di bawah
++            }
++        }
++
++        return ['ide' => self::templateIde($tugas), 'mode' => 'template'];
++    }
++
++    private static function templateIde(array $tugas): string
++    {
++        $pilar = (string) ($tugas['pilar'] ?? 'Umum');
++        $judul = (string) ($tugas['judul'] ?? 'Ide baru');
++        $gaya = (string) ($tugas['gaya'] ?? '');
++        $kata = (int) ($tugas['jumlah_kata'] ?? 300);
++        return '[' . $pilar . '] ' . $judul . ': mulai dari pertanyaan yang paling sering ditanya, '
++            . 'bongkar satu mitos yang beredar, lalu tutup dengan satu langkah praktis yang bisa dicoba hari ini.'
++            . ($gaya !== '' ? ' Gaya: ' . $gaya . '.' : '')
++            . ' Target sekitar ' . $kata . ' kata.';
++    }
++}
+diff --git a/docs/n100n-integration.md b/docs/n100n-integration.md
+new file mode 100644
+index 0000000..745c4e1
+--- /dev/null
++++ b/docs/n100n-integration.md
+@@ -0,0 +1,122 @@
++# Integrasi n100n (Workflow WOWO)
++
++n100n adalah engine automasi lokal (mirip n8n) yang menjalankan alur "WOWO":
++ambil pilar konten → baca topik yang sudah ada → susun prompt → titip tugas ke
++Wowo → tunggu → cek hasil → simpan ide.
++
++KRA menyediakan endpoint yang dipanggil n100n, dan sebaliknya KRA bisa memicu
++workflow n100n.
++
++## 1. Konfigurasi
++
++Tambahkan ke environment (XAMPP: `setprop` / wrapper Apache, atau `.env` bila ada):
++
++```env
++# alamat n100n + token (APP_API_TOKEN dari .env n100n)
++KRA_N100N_URL=http://127.0.0.1:5679
++KRA_N100N_TOKEN=<APP_API_TOKEN n100n>
++
++# kunci yang dikirim n100n ke endpoint Wowo (harus sama dengan KRA_API_KEY di .env n100n)
++KRA_WOWO_API_KEY=<kunci acak>
++
++# cara Wowo menghasilkan ide: template | agent | manual
++KRA_WOWO_MODE=template
++
++# khusus mode agent
++KRA_WOWO_AGENT=rama
++
++# opsional: file JSON pilar konten (format: [{"id":1,"nama":"Edukasi",...}])
++KRA_WOWO_PILAR_FILE=
++```
++
++Mode `template` menghasilkan ide contoh secara deterministik supaya alur bisa
++diuji tanpa model AI. Setelah model siap, ubah ke `agent` (memakai
++`KraAgentChat`) atau `manual` (ide diisi lewat `?action=wowo-selesai`).
++Generator kustom bisa dipasang dari kode:
++
++```php
++KraWowoBridge::setGenerator(fn(array $tugas): string => KraModelDispatcher::...);
++```
++
++## 2. Endpoint yang dipanggil Workflow WOWO
++
++| Method | Endpoint | Balasan |
++|---|---|---|
++| GET | `api/index.php?action=wowo-pilar` | `{"pilar":[{"id":1,"nama":"Edukasi","deskripsi":"..."}]}` |
++| POST | `api/index.php?action=wowo-tugas` | `{"ok":true,"task_id":"T1001","status":"selesai"}` |
++| GET | `api/index.php?action=wowo-tugas&status=selesai` | `{"items":[{"task_id":"T1001","status":"selesai","ide":"..."}]}` |
++| POST | `api/index.php?action=wowo-selesai` | `{"ok":true,"tugas":{...}}` |
++
++Semua POST wajib menyertakan header `x-api-key: <KRA_WOWO_API_KEY>` (kalau
++variabel itu diisi). Data disimpan di `.temp/wowo.json` dengan `flock` — tidak
++butuh MySQL, mengikuti pola `KraTaskEngine`.
++
++```bash
++curl -H "x-api-key: KUNCI" "http://127.0.0.1:8080/api/index.php?action=wowo-pilar"
++
++curl -X POST -H "x-api-key: KUNCI" -H "Content-Type: application/json" \
++  -d '{"agen":"wowo","pilar":"Edukasi","judul":"Edukasi #9","prompt":"Buat 1 ide konten"}' \
++  "http://127.0.0.1:8080/api/index.php?action=wowo-tugas"
++
++curl -H "x-api-key: KUNCI" "http://127.0.0.1:8080/api/index.php?action=wowo-tugas&status=selesai"
++```
++
++### Menyambungkan URL
++
++`workflows/wowo.json` secara default memanggil `{KRA_BASE_URL}/api/pilar-konten`
++dan `/api/tugas`. Pilih salah satu:
++
++**a. Rewrite Apache** (`.htaccess` di root proyek KRA):
++
++```apache
++RewriteEngine On
++RewriteRule ^api/pilar-konten$ api/index.php?action=wowo-pilar [L,QSA]
++RewriteRule ^api/tugas/([A-Za-z0-9_-]+)/selesai$ api/index.php?action=wowo-selesai&task_id=$1 [L,QSA]
++RewriteRule ^api/tugas$ api/index.php?action=wowo-tugas [L,QSA]
++```
++
++lalu `.env` n100n cukup: `KRA_BASE_URL=http://127.0.0.1:8080`.
++
++**b. Tanpa rewrite** — isi URL penuh di `.env` n100n, tidak perlu ubah workflow:
++
++```env
++KRA_PILAR_URL=http://127.0.0.1:8080/api/index.php?action=wowo-pilar
++KRA_TUGAS_URL=http://127.0.0.1:8080/api/index.php?action=wowo-tugas
++KRA_TUGAS_LIST_URL=http://127.0.0.1:8080/api/index.php?action=wowo-tugas
++```
++
++## 3. KRA memicu n100n
++
++| Endpoint | Kegunaan |
++|---|---|
++| `GET ?action=n100n-status` | status n100n + ringkasan Wowo (tidak pernah 500) |
++| `GET ?action=n100n-workflows` | daftar workflow n100n (id, nama, aktif) |
++| `POST ?action=n100n-run` | jalankan workflow: `{"workflow_id":1,"mode":"async","wait":true}` |
++| `GET ?action=n100n-execution&id=12` | detail eksekusi (log + runs per node) |
++
++`mode=sync` menunggu langsung (cocok untuk workflow pendek). Untuk WOWO pakai
++`async` + `wait=true` (default) karena ada node tunggu 15 detik dan 1 menit.
++
++```php
++require_once __DIR__ . '/api/lib/KraN100nClient.php';
++
++$mulai  = KraN100nClient::runAsync(1, [['schedule' => gmdate('c')]]);
++$detail = KraN100nClient::waitExecution((int) $mulai['execution_id'], 600);
++```
++
++## 4. Uji
++
++```bat
++php tools/wowo-bridge-test.php          :: uji KraWowoBridge tanpa web server
++php -l api/lib/KraN100nClient.php       :: cek sintaks
++```
++
++Hasil yang diharapkan: `N/N pemeriksaan lolos`.
++
++Uji ujung-ke-ujung dari sisi n100n (memakai mock KRA):
++
++```bat
++cd C:\xampp\htdocs\n100n
++node examples/mock-kra.js
++npm run smoke
++```
+diff --git a/tools/wowo-bridge-test.php b/tools/wowo-bridge-test.php
+new file mode 100644
+index 0000000..ae49944
+--- /dev/null
++++ b/tools/wowo-bridge-test.php
+@@ -0,0 +1,119 @@
++<?php
++declare(strict_types=1);
++
++/**
++ * Uji cepat KraWowoBridge tanpa web server / MySQL.
++ * Jalankan dari folder proyek KRA:  php tools/wowo-bridge-test.php
++ * Keluar dengan kode 1 bila ada pemeriksaan yang gagal (siap dipakai di CI).
++ */
++
++require_once __DIR__ . '/../api/lib/KraWowoBridge.php';
++
++$GLOBALS['lulus'] = 0;
++$GLOBALS['gagal'] = 0;
++
++function cek(string $nama, bool $ok, string $info = ''): void
++{
++    if ($ok) {
++        $GLOBALS['lulus']++;
++        echo "  ok    {$nama}" . ($info !== '' ? "  ({$info})" : '') . PHP_EOL;
++        return;
++    }
++    $GLOBALS['gagal']++;
++    echo " GAGAL  {$nama}" . ($info !== '' ? "  ({$info})" : '') . PHP_EOL;
++}
++
++$storage = dirname(__DIR__) . DIRECTORY_SEPARATOR . '.temp' . DIRECTORY_SEPARATOR . 'wowo.json';
++$backup = $storage . '.test-backup';
++if (is_file($storage)) {
++    @rename($storage, $backup);
++}
++
++echo "KraWowoBridge — uji dasar" . PHP_EOL;
++
++// 1. pilar
++$pilar = KraWowoBridge::pilarKonten();
++cek('pilar konten tersedia', count($pilar) >= 3, count($pilar) . ' pilar');
++cek('pilar punya nama', isset($pilar[0]['nama']) && $pilar[0]['nama'] !== '', (string) ($pilar[0]['nama'] ?? ''));
++
++// 2. validasi input
++$kosong = KraWowoBridge::terimaTugas(['prompt' => '']);
++cek('tolak tugas tanpa prompt', ($kosong['ok'] ?? true) === false);
++
++// 3. mode template (default)
++putenv('KRA_WOWO_MODE=template');
++$tugas = KraWowoBridge::terimaTugas([
++    'agen' => 'wowo',
++    'pilar' => 'Edukasi',
++    'judul' => 'Edukasi #9',
++    'prompt' => 'Buat 1 ide konten edukasi',
++    'gaya' => 'santai',
++    'jumlah_kata' => 250,
++]);
++cek('tugas diterima', ($tugas['ok'] ?? false) === true, (string) ($tugas['task_id'] ?? ''));
++cek('task_id berawalan T', str_starts_with((string) ($tugas['task_id'] ?? ''), 'T'));
++cek('mode template langsung selesai', ($tugas['status'] ?? '') === 'selesai');
++
++$id = (string) ($tugas['task_id'] ?? '');
++$tersimpan = KraWowoBridge::tugas($id);
++cek('tugas tersimpan', $tersimpan !== null);
++cek('ide terisi', $tersimpan !== null && trim((string) ($tersimpan['ide'] ?? '')) !== '');
++cek('pilar tersimpan', ($tersimpan['pilar'] ?? '') === 'Edukasi');
++
++// 4. daftar + filter
++$semua = KraWowoBridge::daftarTugas();
++$selesai = KraWowoBridge::daftarTugas('selesai');
++cek('daftar tugas berisi', count($semua) >= 1, count($semua) . ' tugas');
++cek('filter status selesai', count($selesai) >= 1 && count($selesai) <= count($semua));
++
++// 5. mode manual
++putenv('KRA_WOWO_MODE=manual');
++$manual = KraWowoBridge::terimaTugas(['prompt' => 'Tulis ide manual', 'pilar' => 'Opini']);
++$idManual = (string) ($manual['task_id'] ?? '');
++cek('mode manual tetap diproses', ($manual['status'] ?? '') === 'diproses');
++
++$tolak = KraWowoBridge::selesaikan($idManual, '');
++cek('tolak ide kosong', ($tolak['ok'] ?? true) === false);
++
++$selesaiManual = KraWowoBridge::selesaikan($idManual, 'Ide jadi dari manusia.', ['mode' => 'manual']);
++cek('selesaikan manual berhasil', ($selesaiManual['ok'] ?? false) === true);
++cek('status jadi selesai', ($selesaiManual['tugas']['status'] ?? '') === 'selesai');
++cek('ide tersimpan', ($selesaiManual['tugas']['ide'] ?? '') === 'Ide jadi dari manusia.');
++
++$tidakAda = KraWowoBridge::selesaikan('T999999', 'apa saja');
++cek('tugas tak dikenal ditolak', ($tidakAda['ok'] ?? true) === false);
++
++// 6. ringkasan
++$ringkas = KraWowoBridge::ringkasan();
++cek('ringkasan menghitung total', ($ringkas['total'] ?? 0) >= 2, (string) ($ringkas['total'] ?? 0));
++
++// 7. otorisasi API key
++putenv('KRA_WOWO_API_KEY=kunci-uji');
++unset($_SERVER['HTTP_X_API_KEY']);
++cek('tanpa header ditolak saat kunci diset', KraWowoBridge::authorized() === false);
++cek('POST tugas ditolak tanpa kunci', (KraWowoBridge::terimaTugas(['prompt' => 'x'])['ok'] ?? true) === false);
++$_SERVER['HTTP_X_API_KEY'] = 'kunci-uji';
++cek('header benar diterima', KraWowoBridge::authorized() === true);
++putenv('KRA_WOWO_API_KEY');
++unset($_SERVER['HTTP_X_API_KEY']);
++
++// 8. generator kustom
++putenv('KRA_WOWO_MODE=template');
++KraWowoBridge::setGenerator(static function (array $tugas): string {
++    return 'IDE KUSTOM untuk ' . ($tugas['judul'] ?? '?');
++});
++$kustom = KraWowoBridge::terimaTugas(['prompt' => 'pakai generator kustom', 'judul' => 'Kustom #1']);
++$kustomTugas = KraWowoBridge::tugas((string) ($kustom['task_id'] ?? ''));
++cek('generator kustom dipakai', str_starts_with((string) ($kustomTugas['ide'] ?? ''), 'IDE KUSTOM'));
++cek('mode tercatat custom', ($kustomTugas['mode'] ?? '') === 'custom');
++KraWowoBridge::setGenerator(null);
++
++echo PHP_EOL . $GLOBALS['lulus'] . '/' . ($GLOBALS['lulus'] + $GLOBALS['gagal']) . ' pemeriksaan lolos' . PHP_EOL;
++
++if (is_file($backup)) {
++    @rename($backup, $storage);
++} elseif (is_file($storage)) {
++    @unlink($storage);
++}
++
++exit($GLOBALS['gagal'] > 0 ? 1 : 0);

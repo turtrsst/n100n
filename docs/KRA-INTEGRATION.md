@@ -51,47 +51,45 @@ Di dalam workflow, data masuk ada di `$json.body`, query di `$json.query`.
   yang dikembalikan (status, header) ke pemanggil.
 - tanpa `wait=1` → 202 `{"accepted":true}` (fire and forget).
 
-### c. Dari PHP (drop-in untuk Laravel KRA)
+### c. Dari PHP di kantor-rama-ai (KRA)
 
-Salin `clients/kra/N100nClient.php` → `app/Support/N100nClient.php`, tambah di `config/services.php`:
+Sudah tersedia kelas khusus yang mengikuti gaya KRA (tanpa Composer, curl +
+fallback streams): **`clients/kra/kantor-rama-ai/api/lib/KraN100nClient.php`**.
+Lihat `clients/kra/kantor-rama-ai/README.md` untuk cara memasang (patch atau copy).
 
 ```php
-'n100n' => ['url' => env('N100N_URL'), 'token' => env('N100N_TOKEN')],
+require_once __DIR__ . '/api/lib/KraN100nClient.php';
+
+KraN100nClient::status();                                  // cek hidup (tak melempar exception)
+KraN100nClient::run(3, [['nama' => 'Rama']], 120);         // workflow pendek, tunggu hasil
+$mulai  = KraN100nClient::runAsync(1, [['schedule' => gmdate('c')]]);
+$detail = KraN100nClient::waitExecution((int) $mulai['execution_id'], 600);
+KraN100nClient::webhook('kra', ['nama' => 'Rama'], true, 'rahasia');
 ```
 
-lalu:
+Lalu dari HTTP KRA:
 
-```php
-use App\Support\N100nClient;
-
-$n100n = N100nClient::fromEnv();
-
-// cek hidup
-$n100n->health();
-
-// jalankan workflow pendek dan tunggu hasil
-$hasil = $n100n->run(3, [['nama' => 'Rama']]);
-
-// workflow panjang (WOWO)
-$execId = $n100n->runAsync(2, [['schedule' => now()->toIso8601String()]]);
-$detail = $n100n->waitExecution($execId, 600);
-
-// picu webhook
-$n100n->webhook('kra', ['nama' => 'Rama'], wait: true, webhookToken: 'rahasia');
+```
+GET  api/index.php?action=n100n-status
+GET  api/index.php?action=n100n-workflows
+POST api/index.php?action=n100n-run          {"workflow_id":1,"mode":"async","wait":true}
+GET  api/index.php?action=n100n-execution&id=12
 ```
 
 `.env` KRA:
 
 ```env
-N100N_URL=http://127.0.0.1:5679
-N100N_TOKEN=<APP_API_TOKEN dari .env n100n>
-N100N_TIMEOUT=30
+KRA_N100N_URL=http://127.0.0.1:5679
+KRA_N100N_TOKEN=<APP_API_TOKEN dari .env n100n>
+KRA_WOWO_API_KEY=<kunci acak, samakan dengan KRA_API_KEY di .env n100n>
+KRA_WOWO_MODE=template    # template | agent | manual
 ```
 
 ## 2. Arah n100n → KRA (WOWO memanggil endpoint KRA)
 
-Workflow WOWO memanggil 3 endpoint. Implementasinya ada di
-`clients/kra/wowo-endpoints.php` (kerangka PDO — sesuaikan nama tabel).
+Implementasinya sudah jadi di `clients/kra/kantor-rama-ai/api/lib/KraWowoBridge.php`
+plus action baru di `api/index.php` (lihat patch). Data disimpan di
+`.temp/wowo.json` dengan flock — tidak butuh MySQL.
 
 | Method | Path | Dipakai node | Balasan minimal |
 |---|---|---|---|
@@ -99,7 +97,19 @@ Workflow WOWO memanggil 3 endpoint. Implementasinya ada di
 | POST | `/api/tugas` | Beri Tugas ke Wowo | `{"task_id":"T123","status":"diproses"}` |
 | GET | `/api/tugas?agen=wowo&status=selesai` | Cek Daftar Tugas | `{"items":[{"task_id":"T123","status":"selesai","ide":"..."}]}` |
 
-Semua endpoint WAJIB menyocokkan header `x-api-key` dengan `KRA_API_KEY` di `.env` n100n.
+Semua endpoint WAJIB menyocokkan header `x-api-key` dengan `KRA_WOWO_API_KEY`
+(env KRA) = `KRA_API_KEY` (env n100n).
+
+URL-nya bisa dioverride tanpa menyentuh workflow:
+
+```env
+KRA_PILAR_URL=http://127.0.0.1:8080/api/index.php?action=wowo-pilar
+KRA_TUGAS_URL=http://127.0.0.1:8080/api/index.php?action=wowo-tugas
+KRA_TUGAS_LIST_URL=http://127.0.0.1:8080/api/index.php?action=wowo-tugas
+```
+
+atau pakai rewrite Apache supaya cukup set `KRA_BASE_URL` (lihat
+`clients/kra/kantor-rama-ai/docs/n100n-integration.md`).
 
 Penting untuk keandalan:
 

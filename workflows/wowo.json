@@ -43,7 +43,7 @@
       "name": "Ambil Pilar Konten",
       "config": {
         "method": "GET",
-        "url": "{{ $env.KRA_BASE_URL || 'http://localhost:5680' }}/api/pilar-konten",
+        "url": "{{ $env.KRA_PILAR_URL || (($env.KRA_BASE_URL || 'http://localhost:5680') + '/api/pilar-konten') }}",
         "headers": {
           "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
           "Accept": "application/json"
@@ -86,7 +86,7 @@
       "name": "Beri Tugas ke Wowo",
       "config": {
         "method": "POST",
-        "url": "{{ $env.KRA_BASE_URL || 'http://localhost:5680' }}/api/tugas",
+        "url": "{{ $env.KRA_TUGAS_URL || (($env.KRA_BASE_URL || 'http://localhost:5680') + '/api/tugas') }}",
         "headers": {
           "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
           "Accept": "application/json"
@@ -143,7 +143,7 @@
       "name": "Cek Daftar Tugas",
       "config": {
         "method": "GET",
-        "url": "{{ $env.KRA_BASE_URL || 'http://localhost:5680' }}/api/tugas",
+        "url": "{{ $env.KRA_TUGAS_LIST_URL || $env.KRA_TUGAS_URL || (($env.KRA_BASE_URL || 'http://localhost:5680') + '/api/tugas') }}",
         "headers": {
           "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
           "Accept": "application/json"
