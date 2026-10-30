@@ -48,6 +48,18 @@ Workflow = daftar node. Data mengalir sebagai **array item** (seperti n8n).
 - `next: null` → alur selesai di node ini.
 - Dua cabang yang menuju node sama otomatis digabung (merge item).
 
+### UI
+
+Halaman `http://localhost:5679` menyediakan:
+
+- **Pratinjau graf** (3 baris × 5 node bila panjang) dengan panah cabang dan panah
+  loop bergaris putus-putus berlabel `ulang` — meniru tampilan n8n di screenshot.
+- **Editor koneksi visual** per node: pilih output (`main` / `true` / `false` / bebas)
+  dan node tujuan lewat dropdown, `+ cabang`, atau kembali ke mode otomatis.
+- **Log live** saat **Run async**, plus pewarnaan node di graf: hijau = sukses,
+  oranye = diputar lebih dari sekali (loop), merah = error, lengkap dengan badge `×N`.
+- Import / Export / Cek alur, dan detail tiap node per eksekusi (masuk, keluar, ms, putaran).
+
 ### Node
 
 | Node | Fungsi |

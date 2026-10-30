@@ -64,6 +64,18 @@
   .edge.back { stroke:var(--warn); stroke-dasharray:4 3; }
   .elabel { fill:#8b93a7; font-size:9px; font-family:system-ui,sans-serif; }
   .runs-table td { font-family:Consolas,monospace; font-size:11.5px; }
+  .gnode.ok rect { stroke:var(--ok); }
+  .gnode.err rect { stroke:var(--err); }
+  .gnode.multi rect { stroke:var(--warn); }
+  .gnode .badge { fill:#0b0d11; }
+  .conns { margin-top:8px; border-top:1px dashed var(--line); padding-top:8px; }
+  .conn-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .conn-row input.out { width:84px; font-family:Consolas,monospace; font-size:12px; }
+  .conn-row select { flex:1; min-width:120px; }
+  .tag { border:1px solid var(--line); border-radius:99px; padding:1px 9px; font-size:11px; color:var(--muted); }
+  .tag.warn { color:var(--warn); border-color:#4a3a22; }
+  #live { background:#0b0d11; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:6px;
+          padding:10px; max-height:260px; overflow:auto; font-family:Consolas,monospace; font-size:12px; white-space:pre-wrap; }
 </style>
 </head>
 <body>
@@ -132,6 +144,7 @@
 
     <h2>Run manual</h2>
     <textarea id="runInput">[{"hello":"world"}]</textarea>
+    <div id="live" class="hidden"></div>
     <pre id="runOut" class="hidden"></pre>
 
     <h2>Eksekusi terakhir</h2>
@@ -170,7 +183,7 @@ const TYPES = {
   stop: { name: 'Stop', config: {} }
 };
 
-let state = { wf: null, workflows: [] };
+let state = { wf: null, workflows: [], runsById: new Map() };
 
 function toast(msg, ms = 2400) {
   $('toast').textContent = msg;
@@ -306,7 +319,6 @@ function renderNodes() {
     const card = document.createElement('div');
     card.className = 'card';
     card.id = 'card-' + node.id;
-    const nextVal = node.next === undefined ? '' : node.next === null ? 'null' : JSON.stringify(node.next);
     card.innerHTML = `
       <div class="node-head">
         <span class="muted" title="id node">${esc(node.id)}</span>
@@ -317,10 +329,7 @@ function renderNodes() {
         <button class="mini danger" data-a="del" title="hapus">✕</button>
       </div>
       <textarea spellcheck="false" data-f="config">${esc(JSON.stringify(node.config || {}, null, 2))}</textarea>
-      <div class="node-foot">
-        <span class="muted">next</span>
-        <input data-f="next" value="${esc(nextVal)}" placeholder='kosong = lanjut node berikutnya · "n3" · {"true":"n9","false":"n10"} · null = selesai'>
-      </div>`;
+      <div class="conns"></div>`;
     card.querySelector('[data-f=type]').onchange = (e) => {
       node.type = e.target.value;
       if (TYPES[node.type] && !Object.keys(node.config || {}).length) {
@@ -334,21 +343,11 @@ function renderNodes() {
       try { node.config = JSON.parse(e.target.value); e.target.style.borderColor = ''; renderGraph(); }
       catch { e.target.style.borderColor = 'var(--err)'; toast('JSON config tidak valid'); }
     };
-    card.querySelector('[data-f=next]').onchange = (e) => {
-      const raw = e.target.value.trim();
-      if (raw === '') { delete node.next; }
-      else if (raw === 'null') { node.next = null; }
-      else {
-        try { node.next = JSON.parse(raw); }
-        catch { node.next = raw; }
-      }
-      e.target.style.borderColor = '';
-      renderGraph();
-    };
     card.querySelector('[data-a=up]').onclick = () => { if (i > 0) { state.wf.nodes.splice(i - 1, 0, state.wf.nodes.splice(i, 1)[0]); renderNodes(); renderGraph(); } };
     card.querySelector('[data-a=down]').onclick = () => { if (i < state.wf.nodes.length - 1) { state.wf.nodes.splice(i + 1, 0, state.wf.nodes.splice(i, 1)[0]); renderNodes(); renderGraph(); } };
     card.querySelector('[data-a=del]').onclick = () => { state.wf.nodes.splice(i, 1); renderNodes(); renderGraph(); };
     wrap.appendChild(card);
+    renderConns(node, card);
   });
 }
 
@@ -363,6 +362,116 @@ $('addBtn').onclick = () => {
   });
   renderNodes(); renderGraph();
 };
+
+// ---------- editor koneksi ----------
+// node.next: undefined = otomatis, null = selesai, string = main, objek = cabang
+function nextToRows(node) {
+  const n = node.next;
+  if (n === undefined) return null;
+  if (n === null) return [];
+  if (typeof n === 'string') return [{ out: 'main', to: n }];
+  if (typeof n === 'object') {
+    return Object.entries(n).filter(([, v]) => v).map(([out, to]) => ({ out, to: String(to) }));
+  }
+  return null;
+}
+
+function renderConns(node, card) {
+  const box = card.querySelector('.conns');
+  if (!box) return;
+  const rows = nextToRows(node);
+  const others = state.wf.nodes.filter((n) => n.id !== node.id);
+
+  const modeTag = () => rows === null
+    ? '<span class="tag">otomatis → node berikutnya di daftar</span>'
+    : rows.length === 0
+      ? '<span class="tag">selesai di sini (tidak ada tujuan)</span>'
+      : '<span class="tag">' + rows.length + ' koneksi manual</span>';
+
+  const resetAuto = () => { delete node.next; renderConns(node, card); renderGraph(); };
+
+  box.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'row';
+  head.style.margin = '0 0 6px';
+  head.innerHTML = modeTag()
+    + ' <button class="mini" data-a="manual">Atur manual</button>'
+    + (rows === null ? '' : ' <button class="mini" data-a="auto" title="kembali ke urutan array">Otomatis</button>');
+  box.appendChild(head);
+  if (head.querySelector('[data-a=auto]')) head.querySelector('[data-a=auto]').onclick = resetAuto;
+  head.querySelector('[data-a=manual]').onclick = () => {
+    const target = others[0] ? others[0].id : null;
+    node.next = target ? { main: target } : null;
+    renderConns(node, card); renderGraph();
+  };
+
+  if (rows === null) return;
+
+  rows.forEach((row, idx) => {
+    const line = document.createElement('div');
+    line.className = 'conn-row';
+    const opts = ['<option value="">— akhir —</option>'].concat(
+      others.map((o) => `<option value="${esc(o.id)}" ${o.id === row.to ? 'selected' : ''}>${esc(o.id)} · ${esc(String(o.name || '').slice(0, 26))}</option>`)
+    ).join('');
+    line.innerHTML = `
+      <input class="out" value="${esc(row.out)}" title="nama output: main / true / false / bebas">
+      <span class="muted">→</span>
+      <select>${opts}</select>
+      <button class="mini danger" data-a="hapus" title="hapus koneksi">✕</button>`;
+    line.querySelector('input.out').onchange = () => commit();
+    line.querySelector('select').onchange = () => commit();
+    line.querySelector('[data-a=hapus]').onclick = () => {
+      rows.splice(idx, 1);
+      node.next = rowsToNext(rows);
+      renderConns(node, card); renderGraph();
+    };
+    box.appendChild(line);
+
+    function commit() {
+      row.out = (line.querySelector('input.out').value || 'main').trim();
+      row.to = line.querySelector('select').value;
+      node.next = rowsToNext(rows);
+      renderConns(node, card); renderGraph();
+    }
+  });
+
+  const add = document.createElement('button');
+  add.className = 'mini';
+  add.textContent = '+ cabang';
+  add.onclick = () => {
+    // pilih nama output yang belum dipakai: main/true/false dulu, lalu cabang2, cabang3, ...
+    const used = new Set(rows.map((r) => r.out));
+    const kandidat = node.type === 'ifElse' ? ['true', 'false', 'main'] : ['main'];
+    let label = kandidat.find((c) => !used.has(c));
+    if (!label) {
+      let i = 2;
+      while (used.has('cabang' + i)) i++;
+      label = 'cabang' + i;
+    }
+    rows.push({ out: label, to: others[0] ? others[0].id : '' });
+    node.next = rowsToNext(rows);
+    renderConns(node, card); renderGraph();
+  };
+  const back = document.createElement('button');
+  back.className = 'mini';
+  back.textContent = 'Otomatis';
+  back.onclick = resetAuto;
+  const tail = document.createElement('div');
+  tail.className = 'row';
+  tail.style.margin = '4px 0 0';
+  tail.appendChild(add);
+  tail.appendChild(back);
+  box.appendChild(tail);
+}
+
+function rowsToNext(rows) {
+  const valid = rows.filter((r) => r.to);
+  if (!valid.length) return null;
+  if (valid.length === 1 && valid[0].out === 'main') return valid[0].to;
+  const map = {};
+  for (const r of valid) map[r.out || 'main'] = r.to;
+  return map;
+}
 
 // ---------- pratinjau graf ----------
 function edgesOf(node) {
@@ -476,9 +585,12 @@ function renderGraph() {
 
   nodes.forEach((n) => {
     const p = pos.get(n.id);
-    parts.push(`<g class="gnode" data-id="${esc(n.id)}">
+    const info = state.runsById ? state.runsById.get(n.id) : null;
+    const cls = info ? (info.error ? 'gnode err' : info.visits > 1 ? 'gnode multi' : 'gnode ok') : 'gnode';
+    const badge = info ? (info.error ? ' ⚠' : '') + (info.visits > 1 ? ' ×' + info.visits : '') : '';
+    parts.push(`<g class="${cls}" data-id="${esc(n.id)}">
       <rect x="${p.x}" y="${p.y}" width="${BW}" height="${BH}"/>
-      <text x="${p.x + 8}" y="${p.y + 18}">${esc(String(n.name || n.id).slice(0, 22))}</text>
+      <text x="${p.x + 8}" y="${p.y + 18}">${esc(String(n.name || n.id).slice(0, 22))}${badge}</text>
       <text class="t" x="${p.x + 8}" y="${p.y + 34}">${esc(n.type)} · ${esc(n.id)}</text>
     </g>`);
   });
@@ -592,6 +704,8 @@ $('runBtn').onclick = async () => {
   try {
     const res = await api('POST', `/api/workflows/${state.wf.id}/run`, { items: input });
     $('runOut').textContent = JSON.stringify(res, null, 2);
+    renderLive(Object.assign({ id: res.execution_id, log: (res.log || []).join('\n') }, res));
+    applyRuns(res.runs);
     loadExecs();
   } catch (e) {
     $('runOut').textContent = 'ERROR: ' + e.message;
@@ -607,22 +721,56 @@ $('runAsyncBtn').onclick = async () => {
   toast('Dijalankan di latar belakang (eksekusi #' + res.execution_id + ')');
   loadExecs();
   let detail = null;
-  for (let i = 0; i < 600; i++) {
+  for (let i = 0; i < 1800; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     detail = await api('GET', '/api/executions/' + res.execution_id);
+    renderLive(detail);
     if (detail.status !== 'running') break;
-    $('runOut').classList.remove('hidden');
-    $('runOut').textContent = 'eksekusi #' + res.execution_id + ' masih berjalan…';
   }
   $('runOut').classList.remove('hidden');
   $('runOut').textContent = JSON.stringify(detail, null, 2);
+  renderLive(detail);
+  applyRuns(detail.runs);
   loadExecs();
 };
+
+// ---------- status node dari eksekusi terakhir ----------
+function applyRuns(runs) {
+  const map = new Map();
+  for (const r of Array.isArray(runs) ? runs : []) {
+    if (!r || !r.id) continue;
+    const prev = map.get(r.id) || { visits: 0, ms: 0, error: null };
+    map.set(r.id, {
+      visits: Math.max(prev.visits, Number(r.visit || 1)),
+      ms: prev.ms + Number(r.ms || 0),
+      error: prev.error || r.error || null,
+    });
+  }
+  state.runsById = map;
+  renderGraph();
+}
+
+function renderLive(detail) {
+  const box = $('live');
+  box.classList.remove('hidden');
+  const head = detail.status === 'running'
+    ? `eksekusi #${detail.id} — BERJALAN…`
+    : `eksekusi #${detail.id} — ${String(detail.status).toUpperCase()}`;
+  const err = detail.error ? '\nERROR: ' + detail.error : '';
+  box.textContent = head + err + '\n' + (detail.log || '');
+  box.scrollTop = box.scrollHeight;
+}
 
 // ---------- eksekusi ----------
 async function loadExecs() {
   if (!state.wf || !state.wf.id) return;
   const rows = await api('GET', '/api/executions?workflow_id=' + state.wf.id);
+  if (rows[0]) {
+    try {
+      const latest = await api('GET', '/api/executions/' + rows[0].id);
+      applyRuns(latest.runs);
+    } catch { /* abaikan */ }
+  }
   $('execs').innerHTML = rows.map((r) => {
     const durasi = r.finished ? Math.round((Date.parse(r.finished) - Date.parse(r.started)) / 1000) + 's' : '—';
     return `<tr data-id="${r.id}">
@@ -651,6 +799,7 @@ async function showExec(id) {
       <td>${r.ms}</td>
       <td class="muted">${r.visit || 1}</td>
   </tr>`).join('') || '<tr><td colspan="6" class="muted">tidak ada detail node</td></tr>';
+  applyRuns(runs);
   $('execJson').classList.remove('hidden');
   $('execJson').textContent = JSON.stringify({
     id: d.id, status: d.status, started: d.started, finished: d.finished, error: d.error,
