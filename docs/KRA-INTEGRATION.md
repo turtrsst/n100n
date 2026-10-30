@@ -53,8 +53,14 @@ tanpa itu → 202 `{"accepted":true}`.
 ### c. Dari PHP di kantor-rama-ai
 
 Kelas siap pakai (gaya KRA: tanpa Composer, curl + fallback streams):
-**`clients/kra/kantor-rama-ai/api/lib/KraN100nClient.php`**. Cara pasang ada di
-`clients/kra/kantor-rama-ai/README.md`.
+**`clients/kra/kantor-rama-ai/api/lib/KraN100nClient.php`**. Pasang dengan
+pemasang otomatis (jalan di branch mana pun, idempoten):
+
+```bash
+node clients/kra/kantor-rama-ai/pasang.js "C:\xampp\htdocs\kantor-rama-ai"
+```
+
+Detail: `clients/kra/kantor-rama-ai/README.md`.
 
 ```php
 require_once __DIR__ . '/api/lib/KraN100nClient.php';
