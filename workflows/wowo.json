@@ -1,0 +1,226 @@
+{
+  "name": "Workflow WOWO",
+  "active": false,
+  "trigger": "schedule",
+  "trigger_cfg": {
+    "mode": "weekly",
+    "days": [
+      1
+    ],
+    "at": "07:00",
+    "timezone": "Asia/Jakarta"
+  },
+  "settings": {
+    "max_steps": 200,
+    "max_visits": 20
+  },
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "schedule",
+      "name": "Tap Senin 07:00",
+      "config": {},
+      "next": "n2"
+    },
+    {
+      "id": "n2",
+      "type": "set",
+      "name": "Pengaturan",
+      "config": {
+        "catatan": "Setelan WOWO. Nilai di sini ikut mengalir ke node berikutnya.",
+        "fields": {
+          "gaya": "{{ $env.WOWO_GAYA || 'bahasa manusiawi, tidak kaku, tanpa emoji berlebihan' }}",
+          "jumlah_kata": "{{ $env.WOWO_JUMLAH_KATA || 300 }}",
+          "bahasa": "id",
+          "pilar_default": "Umum"
+        }
+      },
+      "next": "n3"
+    },
+    {
+      "id": "n3",
+      "type": "http",
+      "name": "Ambil Pilar Konten",
+      "config": {
+        "method": "GET",
+        "url": "{{ $env.KRA_BASE_URL || 'http://localhost:5680' }}/api/pilar-konten",
+        "headers": {
+          "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
+          "Accept": "application/json"
+        },
+        "retry": 2,
+        "retryDelayMs": 1000,
+        "timeoutMs": 20000,
+        "split": "$json.pilar",
+        "keepEmpty": true
+      },
+      "next": "n4"
+    },
+    {
+      "id": "n4",
+      "type": "sheet",
+      "name": "Topik yang Sudah Ada",
+      "config": {
+        "driver": "{{ $env.WOWO_SHEET_DRIVER || 'csv' }}",
+        "action": "read",
+        "path": "{{ $env.WOWO_TOPIC_CSV || 'files/topik.csv' }}",
+        "spreadsheetId": "{{ $env.WOWO_TOPIC_SHEET_ID || '' }}",
+        "range": "{{ $env.WOWO_TOPIC_RANGE || 'Topik!A1:C' }}",
+        "hasHeader": true,
+        "once": true
+      },
+      "next": "n5"
+    },
+    {
+      "id": "n5",
+      "type": "code",
+      "name": "Susun Perintah",
+      "config": {
+        "code": "// items = baris 'Topik yang Sudah Ada', $node = output node sebelumnya\nconst pilar = $node['Ambil Pilar Konten'] || [];\nconst setelan = ($node['Pengaturan'] || [{}])[0] || {};\nconst topik = items\n  .map((t) => String(t.topik || t.Topik || t.judul || '').trim())\n  .filter(Boolean);\n\n// hitung pemakaian pilar: topik diawali nama pilar, kalau tidak cocok pakai prefix sebelum ':'\nconst pilarDari = (t) => {\n  const hit = pilar.find((p) => p && p.nama && t.toLowerCase().startsWith(String(p.nama).toLowerCase()));\n  return hit ? hit.nama : t.split(':')[0].trim();\n};\nconst dipakai = {};\nfor (const t of topik) {\n  const k = pilarDari(t);\n  dipakai[k] = (dipakai[k] || 0) + 1;\n}\n\n// pilih pilar yang paling jarang dipakai\nconst urut = pilar.slice().sort((a, b) => (dipakai[a.nama] || 0) - (dipakai[b.nama] || 0));\nconst pilih = urut[0] || { nama: setelan.pilar_default || 'Umum', id: null };\nconst nomor = (dipakai[pilih.nama] || 0) + 1;\nconst judul = pilih.nama + ' #' + nomor;\n\nconst prompt = [\n  'Buat 1 ide konten untuk topik \"' + judul + '\".',\n  'Pilar: ' + pilih.nama + (pilih.deskripsi ? ' (' + pilih.deskripsi + ')' : ''),\n  'Gaya: ' + (setelan.gaya || 'bahasa manusiawi'),\n  'Panjang: ' + (setelan.jumlah_kata || 300) + ' kata',\n  'Jangan ulangi topik yang sudah ada: ' + (topik.length ? topik.join('; ') : '(belum ada)'),\n  'Balas JSON: {\"judul\": \"...\", \"ide\": \"...\"}',\n].join('\\n');\n\nreturn [{\n  pilar: pilih.nama,\n  pilar_id: pilih.id,\n  judul,\n  prompt,\n  gaya: setelan.gaya,\n  jumlah_kata: setelan.jumlah_kata,\n  topik_sudah_ada: topik,\n  diminta: new Date().toISOString(),\n}];"
+      },
+      "next": "n6"
+    },
+    {
+      "id": "n6",
+      "type": "http",
+      "name": "Beri Tugas ke Wowo",
+      "config": {
+        "method": "POST",
+        "url": "{{ $env.KRA_BASE_URL || 'http://localhost:5680' }}/api/tugas",
+        "headers": {
+          "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
+          "Accept": "application/json"
+        },
+        "body": {
+          "agen": "wowo",
+          "pilar": "{{ $json.pilar }}",
+          "judul": "{{ $json.judul }}",
+          "prompt": "{{ $json.prompt }}",
+          "gaya": "{{ $json.gaya }}",
+          "jumlah_kata": "{{ $json.jumlah_kata }}"
+        },
+        "allowNon2xx": true,
+        "retry": 1,
+        "retryDelayMs": 1000,
+        "timeoutMs": 30000
+      },
+      "next": "n7"
+    },
+    {
+      "id": "n7",
+      "type": "code",
+      "name": "Catat ID Tugas",
+      "config": {
+        "code": "// http node boleh balik { error, status, body } saat gagal (allowNon2xx)\nconst raw = items[0] || {};\nconst data = raw.body && typeof raw.body === 'object' ? raw.body : raw;\nconst tugas = ($node['Susun Perintah'] || [{}])[0] || {};\nconst task_id = data.task_id !== undefined ? data.task_id : (data.id !== undefined ? data.id : null);\n$vars.coba = ($vars.coba || 0) + 1;\nreturn [{\n  task_id,\n  status: data.status || (task_id ? 'terkirim' : 'menunggu'),\n  error: raw.error || null,\n  percobaan: $vars.coba,\n  judul: data.judul || tugas.judul || null,\n  pilar: data.pilar || tugas.pilar || null,\n}];"
+      },
+      "next": "n8"
+    },
+    {
+      "id": "n8",
+      "type": "ifElse",
+      "name": "Tugas Terkirim?",
+      "config": {
+        "condition": "!$json.task_id && $vars.coba < 3",
+        "catatan": "true = belum dapat ID tugas -> tunggu 15 detik lalu kirim ulang. false = sudah terkirim (atau menyerah) -> cek daftar tugas."
+      },
+      "next": {
+        "true": "n9",
+        "false": "n10"
+      }
+    },
+    {
+      "id": "n9",
+      "type": "wait",
+      "name": "Tunggu 15 Detik",
+      "config": {
+        "ms": 15000
+      },
+      "next": "n6"
+    },
+    {
+      "id": "n10",
+      "type": "http",
+      "name": "Cek Daftar Tugas",
+      "config": {
+        "method": "GET",
+        "url": "{{ $env.KRA_BASE_URL || 'http://localhost:5680' }}/api/tugas",
+        "headers": {
+          "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
+          "Accept": "application/json"
+        },
+        "query": {
+          "agen": "wowo",
+          "status": "selesai"
+        },
+        "retry": 2,
+        "retryDelayMs": 1000,
+        "timeoutMs": 20000,
+        "split": "$json.items",
+        "keepEmpty": true
+      },
+      "next": "n11"
+    },
+    {
+      "id": "n11",
+      "type": "code",
+      "name": "Cari Hasil",
+      "config": {
+        "code": "$vars.cek = ($vars.cek || 0) + 1;\n\nconst hasil = items.filter((i) => i && i.status !== 'diproses' && (i.ide || i.hasil || i.judul));\nif (!hasil.length) {\n  return [{ menunggu: true, jumlah: 0, putaran: $vars.cek }];\n}\nreturn hasil.map((h) => Object.assign({ menunggu: false, putaran: $vars.cek }, h));"
+      },
+      "next": "n12"
+    },
+    {
+      "id": "n12",
+      "type": "ifElse",
+      "name": "Masih Menunggu?",
+      "config": {
+        "condition": "$json.menunggu === true && $vars.cek < 5",
+        "catatan": "true = Wowo belum selesai -> tunggu 1 menit lalu cek lagi (maks 5 putaran). false = ada hasil -> parse ide."
+      },
+      "next": {
+        "true": "n13",
+        "false": "n14"
+      }
+    },
+    {
+      "id": "n13",
+      "type": "wait",
+      "name": "Tunggu 1 Menit",
+      "config": {
+        "ms": 60000
+      },
+      "next": "n10"
+    },
+    {
+      "id": "n14",
+      "type": "code",
+      "name": "Parse Ide",
+      "config": {
+        "code": "const out = [];\nfor (const it of items) {\n  if (!it || it.menunggu) continue;\n  const ide = it.ide || it.hasil || it.konten || '';\n  if (!ide) continue;\n  out.push({\n    dibuat: new Date().toISOString(),\n    task_id: it.task_id !== undefined ? it.task_id : (it.id || ''),\n    pilar: it.pilar || '',\n    judul: it.judul || '',\n    ide: String(ide).replace(/\\s+/g, ' ').trim().slice(0, 2000),\n  });\n}\nif (!out.length) {\n  // tidak ada ide: biarkan kosong agar node berikutnya tidak menyimpan baris kosong\n  return [];\n}\nreturn out;"
+      },
+      "next": "n15"
+    },
+    {
+      "id": "n15",
+      "type": "sheet",
+      "name": "Simpan Ide",
+      "config": {
+        "driver": "{{ $env.WOWO_SHEET_DRIVER || 'csv' }}",
+        "action": "append",
+        "path": "{{ $env.WOWO_IDE_CSV || 'files/ide.csv' }}",
+        "spreadsheetId": "{{ $env.WOWO_IDE_SHEET_ID || '' }}",
+        "range": "{{ $env.WOWO_IDE_RANGE || 'Ide!A1:E' }}",
+        "once": true,
+        "rows": "{{ $items }}",
+        "columns": [
+          "dibuat",
+          "task_id",
+          "pilar",
+          "judul",
+          "ide"
+        ]
+      },
+      "next": null
+    }
+  ]
+}
