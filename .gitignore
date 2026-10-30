@@ -1,0 +1,13 @@
+# Rahasia — jangan pernah di-commit
+.env
+
+# Backup & lokal
+*.tgz
+backup-*.tgz
+files/
+node_modules/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

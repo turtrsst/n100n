@@ -1,0 +1,64 @@
+# n100n - n8n self-hosted (PostgreSQL)
+# Jalankan : docker compose up -d
+# Hentikan : docker compose down
+# Tunnel   : docker compose --profile tunnel up -d   (Cloudflare, tanpa akun)
+# Ngrok    : jalankan native Windows -> ngrok http 5678 (lihat PANDUAN.md)
+
+volumes:
+  db_storage:
+  n8n_storage:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: n8n-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=n8n_user
+      - POSTGRES_PASSWORD=n8n_password_rahasia
+      - POSTGRES_DB=n8n_database
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n_user -d n8n_database"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n-local-app
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_database
+      - DB_POSTGRESDB_USER=n8n_user
+      - DB_POSTGRESDB_PASSWORD=n8n_password_rahasia
+    env_file:
+      - .env
+    volumes:
+      - n8n_storage:/home/node/.n8n
+    mem_limit: ${N8N_MEM_LIMIT:-1g}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5678/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Tunnel cepat tanpa akun: https://xxxx.trycloudflare.com -> n8n:5678
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://n8n:5678
+    depends_on:
+      - n8n
