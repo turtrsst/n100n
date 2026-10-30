@@ -22,6 +22,14 @@ node --env-file=.env server.js
 ```
 
 Buka `http://localhost:5679`. Password admin ada di `.env` (`APP_PASSWORD`). Data di `data\n100n.db`.
+
+Ada dua tab di header:
+
+- **Dasbor** — kartu ringkasan (jumlah workflow, eksekusi 24 jam, tingkat sukses,
+  rata-rata durasi), grafik aktivitas 7 hari, daftar workflow dengan tombol
+  **Buka**/**Run**, dan 8 eksekusi terakhir (klik untuk detail). Diperbarui
+  otomatis tiap 5 detik; datanya dari `GET /api/stats`.
+- **Editor** — kanvas graf, editor node/koneksi, run manual, log live, riwayat.
 Saat pertama kali dijalankan (database kosong), semua file `workflows/*.json`
 dimuat sebagai contoh: `contoh-alur-polling.json` (kirim tugas → tunggu → cek
 hasil → simpan) dan `contoh-webhook.json` (terima → olah → balas).
@@ -149,6 +157,7 @@ curl -H "x-api-key: TOKEN" "http://localhost:5679/api/executions?workflow_id=1"
 | `POST /api/workflows/:id/run` | jalankan (`?async=1` untuk latar belakang) |
 | `GET /api/executions[?workflow_id=&status=&limit=]` | riwayat |
 | `GET /api/executions/:id[?wait=1&timeoutMs=120000]` | detail + log + runs per node |
+| `GET /api/stats[?days=7]` | ringkasan dasbor: hitungan, tingkat sukses 24 jam, grafik harian, eksekusi terbaru |
 | `GET /api/nodes` | daftar tipe node |
 | `ALL /webhook/:path` | trigger webhook |
 

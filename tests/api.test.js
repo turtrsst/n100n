@@ -192,6 +192,27 @@ test('sheet csv tulis: header ditulis dari columns', async () => {
   fs.unlinkSync(file);
 });
 
+test('GET /api/stats: ringkasan dasbor', async () => {
+  const wf = store.createWorkflow({
+    name: 'stat-uji', active: 1,
+    nodes: [{ id: 'a', type: 'code', config: { code: 'return items;' }, next: null }],
+  });
+  await call(base, 'POST', `/api/workflows/${wf.id}/run`, { token: TOKEN, body: { items: [{ a: 1 }] } });
+
+  const r = await call(base, 'GET', '/api/stats?days=7', { token: TOKEN });
+  assert.strictEqual(r.status, 200);
+  const s = r.data;
+  assert.strictEqual(s.ok, true);
+  assert.ok(s.workflows.total >= 1 && s.workflows.aktif >= 1, 'hitung workflow');
+  assert.ok(s.executions.total >= 1 && s.executions.hari_ini >= 1, 'hitung eksekusi 24 jam');
+  assert.strictEqual(s.perDay.length, 7, 'grafik 7 hari');
+  const hariIni = s.perDay[s.perDay.length - 1];
+  assert.ok(hariIni.total >= 1, 'hari terakhir memuat eksekusi');
+  assert.ok(s.executions.tingkat_sukses >= 0 && s.executions.tingkat_sukses <= 100);
+  assert.ok(Array.isArray(s.terbaru) && s.terbaru.length >= 1 && s.terbaru[0].wf === 'stat-uji', 'nama workflow di eksekusi terbaru');
+  store.deleteWorkflow(wf.id);
+});
+
 test('import dan export definisi workflow', async () => {
   const definisi = {
     name: 'impor contoh mini',

@@ -167,7 +167,21 @@ KraN100nClient::webhook('kra', ['nama' => 'Rama'], wait: true, webhookToken: 'ra
 
 Detail kontrak dua arah: `docs/KRA-INTEGRATION.md`.
 
-## 5. Menelusuri masalah
+## 5. Memantau dari dasbor
+
+Tab **Dasbor** (default setelah login) menampilkan:
+
+| Bagian | Isi |
+|---|---|
+| 4 kartu | jumlah workflow (aktif/nonaktif), eksekusi 24 jam, tingkat sukses, rata-rata durasi |
+| Grafik 7 hari | batang hijau = sukses, merah = gagal, per tanggal (UTC) |
+| Tabel workflow | trigger, status aktif, terakhir jalan, tombol **Buka** dan **Run** (async) |
+| Eksekusi terakhir | 8 terakhir; klik satu baris → pindah ke editor workflow itu + detail node |
+
+Sumber datanya `GET /api/stats` (juga bisa dipakai app lain / KRA), diperbarui
+otomatis tiap 5 detik selama tab Dasbor terbuka.
+
+## 6. Menelusuri masalah
 
 - Tab **Eksekusi terakhir** → klik baris → lihat log per langkah + `runs`
   (masuk, keluar, ms, putaran ke berapa).

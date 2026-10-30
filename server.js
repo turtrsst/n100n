@@ -14,7 +14,7 @@ const { NODE_TYPES } = require('./lib/nodes');
 
 engine.setStore(store);
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const ROOT = __dirname;
 const PORT = Number(process.env.APP_PORT || 5679);
 const HOST = process.env.APP_HOST || '0.0.0.0';
@@ -274,6 +274,12 @@ async function handleApi(req, res, url) {
     if (!id && req.method === 'DELETE') {
       return send(res, 200, { ok: true, dihapus: store.pruneExecutions(Number(url.searchParams.get('keep') || 500)) });
     }
+  }
+
+  if (resource === 'stats' && req.method === 'GET') {
+    return send(res, 200, Object.assign({ ok: true }, store.stats({
+      days: url.searchParams.get('days'),
+    })));
   }
 
   if (resource === 'health') {

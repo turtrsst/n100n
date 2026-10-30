@@ -23,7 +23,7 @@ window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
 window.confirm = () => false;
 window.HTMLElement.prototype.scrollIntoView = function () {};
 window.eval(html.match(/<script>([\s\S]*)<\/script>/)[1]
-  + '\n;window.__t = { get state(){ return state; }, renderEditor, renderGraph, applyRuns, renderLive, renderTriggerFields };');
+  + '\n;window.__t = { get state(){ return state; }, renderEditor, renderGraph, applyRuns, renderLive, renderTriggerFields, tampilView, muatDasbor, gambarDasbor };');
 
 const pokok = [];
 const cek = (nama, syarat, info = '') => {
@@ -31,7 +31,7 @@ const cek = (nama, syarat, info = '') => {
   console.log((syarat ? '  ok  ' : ' GAGAL') + '  ' + nama + (info ? '  (' + info + ')' : ''));
 };
 
-setTimeout(() => {
+setTimeout(async () => {
   const doc = window.document;
   window.__t.state.wf = Object.assign({ id: 1 }, wf);
   window.__t.renderEditor();
@@ -74,6 +74,46 @@ setTimeout(() => {
   cek('form trigger punya input jam', !!doc.getElementById('cbAt'));
 
   cek('layar login aktif saat belum auth', !doc.getElementById('login').classList.contains('hidden'));
+
+  // ---------- dasbor ----------
+  const hari = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  const stub = {
+    '/api/stats': {
+      ok: true,
+      workflows: { total: 2, aktif: 1 },
+      executions: { total: 12, sukses: 10, gagal: 2, hari_ini: 5, sukses_24j: 4, gagal_24j: 1, berjalan: 0, tingkat_sukses: 80, rata_ms: 1234 },
+      perDay: [0, 1, 2, 3, 4, 5, 6].map((n) => ({ tanggal: hari(6 - n), total: n, sukses: n, gagal: 0 })),
+      terbaru: [
+        { id: 9, workflow_id: 1, status: 'success', trigger: 'api', started: new Date().toISOString(), finished: new Date().toISOString(), ms: 900, wf: 'Alur A' },
+        { id: 8, workflow_id: 2, status: 'error', trigger: 'webhook', started: new Date().toISOString(), finished: new Date().toISOString(), ms: 12, wf: 'Hook', error: 'x' },
+      ],
+    },
+    '/api/workflows': [
+      { id: 1, name: 'Alur A', trigger: 'manual', active: 1, last_run: new Date().toISOString() },
+      { id: 2, name: 'Hook', trigger: 'webhook', active: 0, last_run: null },
+    ],
+  };
+  const fetchAsli = window.fetch;
+  window.fetch = async (url) => ({ ok: true, status: 200, json: async () => stub[String(url)] || {} });
+
+  window.__t.tampilView('dash');
+  await new Promise((r) => setTimeout(r, 50)); // tampilView memuat dasbor secara async
+
+  const kartu = [...doc.querySelectorAll('#dashStats .stat')];
+  cek('dasbor: 4 kartu ringkasan', kartu.length === 4, kartu.map((k) => k.textContent.trim().split('\n')[0]).join(' | '));
+  cek('dasbor: kartu memuat angka nyata', /80%/.test(doc.getElementById('dashStats').textContent) && /1[.,]2 s/.test(doc.getElementById('dashStats').textContent));
+  cek('dasbor: grafik 7 hari tampil', doc.querySelectorAll('#dashChart .col').length === 7, doc.querySelectorAll('#dashChart .bar').length + ' bar');
+  cek('dasbor: tabel workflow berisi 2 baris', doc.querySelectorAll('#dashWf tr').length === 2);
+  cek('dasbor: status nonaktif ditandai', /nonaktif/.test(doc.getElementById('dashWf').textContent));
+  cek('dasbor: eksekusi terakhir + status', doc.querySelectorAll('#dashExec tr').length === 2 && /pill error/.test(doc.getElementById('dashExec').innerHTML));
+  cek('dasbor: view editor disembunyikan', doc.getElementById('viewEditor').classList.contains('hidden') && !doc.getElementById('viewDash').classList.contains('hidden'));
+
+  window.__t.tampilView('editor');
+  cek('tab editor: dasbor disembunyikan', doc.getElementById('viewDash').classList.contains('hidden') && !doc.getElementById('viewEditor').classList.contains('hidden'));
+  cek('tab aktif mengikuti view', doc.getElementById('tabEditor').classList.contains('active') && !doc.getElementById('tabDash').classList.contains('active'));
+
+  window.__t.tampilView('dash');
+  window.fetch = fetchAsli;
 
   const gagal = pokok.filter((p) => !p.ok).length;
   console.log(`\n${pokok.length - gagal}/${pokok.length} pemeriksaan lolos`);

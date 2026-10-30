@@ -22,7 +22,8 @@
   header h1 { font-size:15px; margin:0; font-weight:600; }
   header .spacer { flex:1; }
   header .ver { color:var(--muted); font-size:11px; }
-  #app { display:grid; grid-template-columns:240px 1fr; height:calc(100vh - 49px); }
+  #app { display:grid; grid-template-columns:240px 1fr; grid-template-rows:49px 1fr; height:100vh; }
+  #app > header { grid-column:1 / -1; }
   aside { border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
   aside .head { padding:10px; display:flex; gap:6px; }
   #list { overflow:auto; flex:1; }
@@ -76,6 +77,24 @@
   .tag.warn { color:var(--warn); border-color:#4a3a22; }
   #live { background:#0b0d11; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:6px;
           padding:10px; max-height:260px; overflow:auto; font-family:Consolas,monospace; font-size:12px; white-space:pre-wrap; }
+  .view.hidden { display:none; }
+  nav.tabs { display:flex; gap:2px; }
+  nav.tabs button { background:transparent; border-color:transparent; color:var(--muted); padding:4px 11px; font-size:12.5px; }
+  nav.tabs button.active { color:var(--text); background:#1d2330; border-color:var(--line); }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin:10px 0 4px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .stat span { display:block; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .stat b { display:block; font-size:23px; font-weight:600; line-height:1.35; }
+  .stat small { color:var(--muted); font-size:11.5px; }
+  .chart { display:flex; align-items:flex-end; gap:6px; height:150px; background:#0b0d11; border:1px solid var(--line);
+           border-radius:8px; padding:10px 10px 6px; }
+  .chart .col { flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:stretch; gap:2px; height:100%; }
+  .chart .bar { border-radius:3px 3px 0 0; background:var(--ok); min-height:2px; }
+  .chart .bar.err { background:var(--err); }
+  .chart .lbl { text-align:center; font-size:10px; color:var(--muted); padding-top:2px; flex:0 0 auto; }
+  td.kanan { text-align:right; white-space:nowrap; }
+  td.kanan button { margin-left:4px; }
+  .pill.off { background:#20242e; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -89,6 +108,16 @@
 </div>
 
 <div id="app" class="hidden">
+  <header>
+    <h1>n100n</h1>
+    <span class="ver" id="appVer"></span>
+    <nav class="tabs">
+      <button id="tabDash" class="active">Dasbor</button>
+      <button id="tabEditor">Editor</button>
+    </nav>
+    <div class="spacer"></div>
+    <button class="mini" id="logoutBtn">Keluar</button>
+  </header>
   <aside>
     <div class="head">
       <button class="primary" id="newBtn" style="flex:1">+ Workflow</button>
@@ -99,6 +128,33 @@
   </aside>
 
   <main>
+    <div id="viewDash" class="view">
+      <div class="row" style="justify-content:space-between; margin-bottom:2px">
+        <div>
+          <h2 style="margin:0">Dasbor</h2>
+          <div class="hint" style="margin:2px 0 0">Ringkasan seluruh workflow &amp; eksekusi · diperbarui otomatis tiap 5 detik</div>
+        </div>
+        <div class="row" style="margin:0">
+          <span id="dashInfo" class="tag">…</span>
+          <button class="mini" id="dashRefresh">Muat ulang</button>
+        </div>
+      </div>
+      <div class="stats" id="dashStats"></div>
+      <h2>Aktivitas 7 hari</h2>
+      <div class="chart" id="dashChart"><div class="muted" style="padding:8px">memuat…</div></div>
+      <h2>Workflow</h2>
+      <table>
+        <thead><tr><th>#</th><th>Nama</th><th>Trigger</th><th>Status</th><th>Terakhir jalan</th><th></th></tr></thead>
+        <tbody id="dashWf"></tbody>
+      </table>
+      <h2>Eksekusi terakhir</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Workflow</th><th>Status</th><th>Trigger</th><th>Mulai</th><th>Durasi</th></tr></thead>
+        <tbody id="dashExec"></tbody>
+      </table>
+    </div>
+
+    <div id="viewEditor" class="view hidden">
     <div class="row">
       <input id="wfName" placeholder="Nama workflow" style="flex:1; min-width:200px">
       <label><input type="checkbox" id="wfActive"> Aktif</label>
@@ -153,6 +209,7 @@
       <h2>Detail eksekusi</h2>
       <table class="runs-table"><thead><tr><th>Node</th><th>Tipe</th><th>Masuk</th><th>Keluar</th><th>ms</th><th>Putaran</th></tr></thead><tbody id="runs"></tbody></table>
       <pre id="execJson" class="hidden"></pre>
+    </div>
     </div>
   </main>
 </div>
@@ -224,6 +281,13 @@ async function boot() {
   renderList();
   if (state.workflows[0]) await open(state.workflows[0].id);
   else $('graph').innerHTML = '<div class="muted" style="padding:12px">belum ada workflow</div>';
+  let awal = 'dash';
+  try { awal = localStorage.getItem('n100n.view') === 'editor' ? 'editor' : 'dash'; } catch { /* abaikan */ }
+  tampilView(awal);
+  try {
+    const v = await api('GET', '/api/version');
+    $('appVer').textContent = 'v' + v.version + ' · node ' + v.node;
+  } catch { /* abaikan */ }
 }
 
 function renderList() {
@@ -608,6 +672,134 @@ function renderGraph() {
   });
 }
 
+// ---------- dasbor ----------
+const fmtWaktu = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+const fmtMs = (ms) => (ms === null || ms === undefined ? '—' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1) + ' s');
+const hariPendek = (tgl) => new Date(tgl + 'T00:00:00Z').toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'UTC' });
+
+let dashTimer = null;
+let dashSibuk = false;
+
+function tampilView(view) {
+  const dash = view === 'dash';
+  $('viewDash').classList.toggle('hidden', !dash);
+  $('viewEditor').classList.toggle('hidden', dash);
+  $('tabDash').classList.toggle('active', dash);
+  $('tabEditor').classList.toggle('active', !dash);
+  try { localStorage.setItem('n100n.view', view); } catch { /* mode privat: abaikan */ }
+  if (dash) {
+    muatDasbor();
+    if (!dashTimer) dashTimer = setInterval(muatDasbor, 5000);
+  } else if (dashTimer) {
+    clearInterval(dashTimer);
+    dashTimer = null;
+  }
+}
+
+async function muatDasbor() {
+  if (dashSibuk) return;
+  dashSibuk = true;
+  try {
+    const [s, wfs] = await Promise.all([api('GET', '/api/stats'), api('GET', '/api/workflows')]);
+    state.workflows = wfs;
+    renderList();
+    gambarDasbor(s);
+  } catch (e) {
+    $('dashInfo').textContent = 'gagal memuat: ' + e.message;
+  } finally {
+    dashSibuk = false;
+  }
+}
+
+function gambarDasbor(s) {
+  const e = s.executions || {};
+  const kartu = [
+    { label: 'Workflow', nilai: s.workflows.total, kecil: s.workflows.aktif + ' aktif · ' + (s.workflows.total - s.workflows.aktif) + ' nonaktif' },
+    { label: 'Eksekusi 24 jam', nilai: e.hari_ini, kecil: e.berjalan + ' berjalan · ' + e.total + ' sepanjang waktu' },
+    { label: 'Tingkat sukses', nilai: e.tingkat_sukses === null || e.tingkat_sukses === undefined ? '—' : e.tingkat_sukses + '%', kecil: e.sukses_24j + ' sukses · ' + e.gagal_24j + ' gagal' },
+    { label: 'Rata-rata durasi', nilai: fmtMs(e.rata_ms), kecil: 'per eksekusi (24 jam)' },
+  ];
+  $('dashStats').innerHTML = kartu.map((k) => `<div class="stat"><span>${esc(k.label)}</span><b>${esc(String(k.nilai))}</b><small>${esc(k.kecil)}</small></div>`).join('');
+
+  const perDay = Array.isArray(s.perDay) ? s.perDay : [];
+  const max = Math.max(1, ...perDay.map((d) => d.total));
+  $('dashChart').innerHTML = perDay.map((d) => {
+    const tinggi = (n) => (d.total ? Math.max(3, Math.round((n / max) * 96)) : 2);
+    return `<div class="col" title="${esc(d.tanggal)}: ${d.total} eksekusi (${d.sukses} sukses, ${d.gagal} gagal)">
+      ${d.gagal ? `<div class="bar err" style="height:${tinggi(d.gagal)}px"></div>` : ''}
+      ${d.sukses ? `<div class="bar" style="height:${tinggi(d.sukses)}px"></div>` : (d.gagal ? '' : '<div class="bar" style="height:2px;opacity:.35"></div>')}
+      <div class="lbl">${esc(hariPendek(d.tanggal))}</div>
+    </div>`;
+  }).join('') || '<div class="muted" style="padding:8px">belum ada data</div>';
+
+  $('dashWf').innerHTML = state.workflows.length === 0
+    ? '<tr><td colspan="6" class="muted">belum ada workflow — klik “+ Workflow” di kiri</td></tr>'
+    : state.workflows.map((w) => `<tr>
+        <td class="muted">#${w.id}</td>
+        <td>${esc(w.name)}</td>
+        <td class="muted">${esc(w.trigger)}</td>
+        <td>${w.active ? '<span class="pill success">aktif</span>' : '<span class="pill off">nonaktif</span>'}</td>
+        <td class="muted">${esc(fmtWaktu(w.last_run))}</td>
+        <td class="kanan">
+          <button class="mini" data-wf="${w.id}" data-a="buka">Buka</button>
+          <button class="mini" data-wf="${w.id}" data-a="run" title="jalankan di latar belakang">Run</button>
+        </td>
+      </tr>`).join('');
+
+  const terbaru = Array.isArray(s.terbaru) ? s.terbaru : [];
+  $('dashExec').innerHTML = terbaru.length === 0
+    ? '<tr><td colspan="6" class="muted">belum ada eksekusi</td></tr>'
+    : terbaru.map((r) => `<tr data-exec="${r.id}">
+        <td class="muted">#${r.id}</td>
+        <td>${esc(r.wf || ('workflow #' + r.workflow_id))}</td>
+        <td><span class="pill ${r.status}">${esc(r.status)}</span></td>
+        <td class="muted">${esc(r.trigger || '')}</td>
+        <td class="muted">${esc(fmtWaktu(r.started))}</td>
+        <td class="muted">${esc(fmtMs(r.ms))}</td>
+      </tr>`).join('');
+
+  $('dashInfo').textContent = 'diperbarui ' + new Date().toLocaleTimeString('id-ID');
+}
+
+$('tabDash').onclick = () => tampilView('dash');
+$('tabEditor').onclick = () => tampilView('editor');
+$('dashRefresh').onclick = () => muatDasbor();
+$('logoutBtn').onclick = async () => {
+  try { await fetch('/api/logout', { method: 'POST' }); } catch { /* abaikan */ }
+  if (dashTimer) { clearInterval(dashTimer); dashTimer = null; }
+  showLogin();
+};
+
+$('dashWf').onclick = async (ev) => {
+  const btn = ev.target.closest('button');
+  if (!btn) return;
+  const id = Number(btn.dataset.wf);
+  if (btn.dataset.a === 'buka') {
+    await open(id);
+    tampilView('editor');
+    return;
+  }
+  try {
+    const res = await api('POST', `/api/workflows/${id}/run?async=1`, { items: [{}] });
+    toast('Dijalankan: eksekusi #' + res.execution_id);
+    muatDasbor();
+  } catch (e) { toast('Gagal run: ' + e.message); }
+};
+
+$('dashExec').onclick = async (ev) => {
+  const tr = ev.target.closest('tr[data-exec]');
+  if (!tr) return;
+  const d = await api('GET', '/api/executions/' + tr.dataset.exec);
+  await open(d.workflow_id);
+  tampilView('editor');
+  showExec(tr.dataset.exec);
+};
+
 // ---------- simpan / hapus / import ----------
 function collectTriggerCfg() {
   const t = $('wfTrigger').value;
@@ -644,6 +836,7 @@ $('saveBtn').onclick = async () => {
     });
     state.workflows = await api('GET', '/api/workflows');
     renderList(); renderTriggerFields(); renderGraph();
+    if (!$('viewDash').classList.contains('hidden')) muatDasbor();
     toast('Tersimpan');
   } catch (e) { toast('Gagal simpan: ' + e.message); }
 };
