@@ -1,0 +1,198 @@
+{
+  "name": "Contoh: Alur Tugas + Polling",
+  "active": false,
+  "trigger": "manual",
+  "trigger_cfg": {},
+  "settings": {
+    "max_steps": 200,
+    "max_visits": 20
+  },
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "manual",
+      "name": "Mulai",
+      "config": {},
+      "next": "n2"
+    },
+    {
+      "id": "n2",
+      "type": "set",
+      "name": "Setelan",
+      "config": {
+        "catatan": "Ubah nilai di sini atau lewat env; semua field mengalir ke node berikutnya.",
+        "fields": {
+          "agen": "{{ $env.CONTOH_AGEN || 'agen-1' }}",
+          "gaya": "{{ $env.CONTOH_GAYA || 'ringkas, bahasa manusiawi' }}",
+          "maks_putaran": "{{ $env.CONTOH_MAKS_PUTARAN || 5 }}"
+        }
+      },
+      "next": "n3"
+    },
+    {
+      "id": "n3",
+      "type": "sheet",
+      "name": "Ambil Catatan",
+      "config": {
+        "driver": "{{ $env.CONTOH_SHEET_DRIVER || 'csv' }}",
+        "action": "read",
+        "path": "{{ $env.CONTOH_SUMBER_CSV || 'files/sumber.csv' }}",
+        "spreadsheetId": "{{ $env.CONTOH_SUMBER_SHEET_ID || '' }}",
+        "range": "{{ $env.CONTOH_SUMBER_RANGE || 'Sumber!A1:C' }}",
+        "hasHeader": true,
+        "once": true
+      },
+      "next": "n4"
+    },
+    {
+      "id": "n4",
+      "type": "code",
+      "name": "Susun Tugas",
+      "config": {
+        "code": "// items  = baris dari sheet 'Ambil Catatan' (referensi agar tidak mengulang)\n// $node  = output node lain pada eksekusi ini\nconst catatan = items\n  .map((r) => String(r.catatan || r.judul || '').trim())\n  .filter(Boolean);\nconst setelan = ($node['Setelan'] || [{}])[0] || {};\nconst nomor = catatan.length + 1;\nconst judul = 'Tugas #' + nomor;\n\nreturn [{\n  agen: setelan.agen || 'agen-1',\n  judul,\n  prompt: [\n    'Kerjakan ' + judul + '.',\n    'Gaya: ' + (setelan.gaya || 'ringkas'),\n    'Jangan ulangi catatan yang sudah ada: ' + (catatan.length ? catatan.join('; ') : '(belum ada)'),\n    'Balas JSON: {\"judul\": \"...\", \"hasil\": \"...\"}'\n  ].join('\\n'),\n  gaya: setelan.gaya,\n  maks_putaran: setelan.maks_putaran,\n  diminta: new Date().toISOString()\n}];"
+      },
+      "next": "n5"
+    },
+    {
+      "id": "n5",
+      "type": "http",
+      "name": "Kirim Tugas",
+      "config": {
+        "method": "POST",
+        "url": "{{ $env.KRA_TUGAS_URL || (($env.KRA_BASE_URL || 'http://localhost:5680') + '/api/tugas') }}",
+        "headers": {
+          "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
+          "Accept": "application/json"
+        },
+        "body": {
+          "agen": "{{ $json.agen }}",
+          "judul": "{{ $json.judul }}",
+          "prompt": "{{ $json.prompt }}",
+          "meta": {
+            "gaya": "{{ $json.gaya }}"
+          }
+        },
+        "allowNon2xx": true,
+        "retry": 1,
+        "retryDelayMs": 1000,
+        "timeoutMs": 30000
+      },
+      "next": "n6"
+    },
+    {
+      "id": "n6",
+      "type": "code",
+      "name": "Catat ID Tugas",
+      "config": {
+        "code": "// http node bisa membalas { error, status, body } saat gagal (allowNon2xx)\nconst raw = items[0] || {};\nconst data = raw.body && typeof raw.body === 'object' ? raw.body : raw;\nconst tugas = ($node['Susun Tugas'] || [{}])[0] || {};\nconst task_id = data.task_id !== undefined ? data.task_id : (data.id !== undefined ? data.id : null);\n\n$vars.coba = ($vars.coba || 0) + 1;\n\nreturn [{\n  task_id,\n  status: data.status || (task_id ? 'terkirim' : 'menunggu'),\n  error: raw.error || null,\n  percobaan: $vars.coba,\n  judul: data.judul || tugas.judul || null\n}];"
+      },
+      "next": "n7"
+    },
+    {
+      "id": "n7",
+      "type": "ifElse",
+      "name": "Terkirim?",
+      "config": {
+        "condition": "!$json.task_id && $vars.coba < 3",
+        "catatan": "true = belum dapat task_id -> tunggu lalu kirim ulang. false = lanjut cek hasil."
+      },
+      "next": {
+        "true": "n8",
+        "false": "n9"
+      }
+    },
+    {
+      "id": "n8",
+      "type": "wait",
+      "name": "Tunggu 15 Detik",
+      "config": {
+        "ms": 15000
+      },
+      "next": "n5"
+    },
+    {
+      "id": "n9",
+      "type": "http",
+      "name": "Cek Hasil",
+      "config": {
+        "method": "GET",
+        "url": "{{ $env.KRA_TUGAS_LIST_URL || $env.KRA_TUGAS_URL || (($env.KRA_BASE_URL || 'http://localhost:5680') + '/api/tugas') }}",
+        "headers": {
+          "x-api-key": "{{ $env.KRA_API_KEY || '' }}",
+          "Accept": "application/json"
+        },
+        "query": {
+          "status": "selesai"
+        },
+        "retry": 2,
+        "retryDelayMs": 1000,
+        "timeoutMs": 20000,
+        "split": "$json.items",
+        "keepEmpty": true
+      },
+      "next": "n10"
+    },
+    {
+      "id": "n10",
+      "type": "code",
+      "name": "Pilih Hasil",
+      "config": {
+        "code": "$vars.cek = ($vars.cek || 0) + 1;\n\nconst hasil = items.filter((i) => i && i.status !== 'diproses' && (i.hasil || i.ide || i.output));\nif (!hasil.length) {\n  return [{ menunggu: true, jumlah: 0, putaran: $vars.cek }];\n}\nreturn hasil.map((h) => Object.assign({ menunggu: false, putaran: $vars.cek }, h));"
+      },
+      "next": "n11"
+    },
+    {
+      "id": "n11",
+      "type": "ifElse",
+      "name": "Masih Menunggu?",
+      "config": {
+        "condition": "$json.menunggu === true && $vars.cek < 5",
+        "catatan": "true = belum ada hasil -> tunggu 1 menit lalu cek lagi. false = simpan hasil."
+      },
+      "next": {
+        "true": "n12",
+        "false": "n13"
+      }
+    },
+    {
+      "id": "n12",
+      "type": "wait",
+      "name": "Tunggu 1 Menit",
+      "config": {
+        "ms": 60000
+      },
+      "next": "n9"
+    },
+    {
+      "id": "n13",
+      "type": "code",
+      "name": "Rapikan Hasil",
+      "config": {
+        "code": "const out = [];\nfor (const it of items) {\n  if (!it || it.menunggu) continue;\n  const isi = it.hasil || it.ide || it.output || '';\n  if (!isi) continue;\n  out.push({\n    dibuat: new Date().toISOString(),\n    task_id: it.task_id !== undefined ? it.task_id : (it.id || ''),\n    agen: it.agen || '',\n    judul: it.judul || '',\n    hasil: String(isi).replace(/\\s+/g, ' ').trim().slice(0, 2000)\n  });\n}\nreturn out;"
+      },
+      "next": "n14"
+    },
+    {
+      "id": "n14",
+      "type": "sheet",
+      "name": "Simpan Hasil",
+      "config": {
+        "driver": "{{ $env.CONTOH_SHEET_DRIVER || 'csv' }}",
+        "action": "append",
+        "path": "{{ $env.CONTOH_HASIL_CSV || 'files/hasil.csv' }}",
+        "spreadsheetId": "{{ $env.CONTOH_HASIL_SHEET_ID || '' }}",
+        "range": "{{ $env.CONTOH_HASIL_RANGE || 'Hasil!A1:E' }}",
+        "once": true,
+        "rows": "{{ $items }}",
+        "columns": [
+          "dibuat",
+          "task_id",
+          "agen",
+          "judul",
+          "hasil"
+        ]
+      },
+      "next": null
+    }
+  ]
+}

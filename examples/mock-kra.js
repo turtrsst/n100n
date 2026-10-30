@@ -1,12 +1,11 @@
 'use strict';
-// Mock API "kantor-rama-ai" untuk menguji Workflow WOWO tanpa server KRA asli.
+// Tiruan API "kantor-rama-ai" untuk menguji contoh alur tanpa server KRA asli.
 // Jalankan: node examples/mock-kra.js   (default http://localhost:5680)
 //
-// Endpoint yang ditiru:
-//   GET  /api/pilar-konten            -> daftar pilar konten
-//   POST /api/tugas                   -> Wowo menerima tugas (sempat gagal N kali untuk uji retry)
-//   GET  /api/tugas?status=selesai    -> tugas yang sudah selesai + ide
-//   POST /api/tugas/:id/selesai       -> tandai tugas selesai manual
+// Kontrak yang ditiru (generik, bukan alur tertentu):
+//   POST /api/tugas                  -> terima tugas  {task_id, status}
+//   GET  /api/tugas?status=selesai   -> daftar tugas + hasil
+//   POST /api/tugas/:id/selesai      -> tandai selesai manual
 //   GET  /health
 //
 // Env:
@@ -19,13 +18,6 @@ const KEY = process.env.MOCK_KRA_KEY || 'dev-kra-key';
 const FAIL_FIRST = Number(process.env.MOCK_TUGAS_FAIL || 1);
 const DURASI_MS = Number(process.env.MOCK_TUGAS_MS || 15000);
 
-const PILAR = [
-  { id: 1, nama: 'Edukasi', deskripsi: 'menjelaskan konsep ke pembaca awam' },
-  { id: 2, nama: 'Studi Kasus', deskripsi: 'cerita nyata dari lapangan' },
-  { id: 3, nama: 'Tips Praktis', deskripsi: 'langkah singkat yang bisa langsung dicoba' },
-  { id: 4, nama: 'Opini', deskripsi: 'sudut pandang penulis atas isu hangat' },
-];
-
 let nextId = 1000;
 const tugas = new Map();
 let jumlahPost = 0;
@@ -35,7 +27,7 @@ function json(res, status, body, extra = {}) {
   res.end(JSON.stringify(body));
 }
 
-function body(req) {
+function bacaBody(req) {
   return new Promise((resolve) => {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
@@ -45,13 +37,13 @@ function body(req) {
   });
 }
 
-function ideUntuk(tugasItem) {
-  const judul = tugasItem.judul || 'Ide baru';
+function hasilUntuk(item) {
+  const judul = item.judul || 'Tugas';
   return {
     judul,
-    ide: `[${tugasItem.pilar || 'Umum'}] ${judul}: mulai dari masalah yang paling sering ditanya klien, `
-      + 'lalu bongkar satu mitos, tutup dengan satu langkah praktis yang bisa dicoba hari ini.',
-    dibuat: new Date().toISOString(),
+    hasil: `[${item.agen || 'agen'}] ${judul}: ringkasan singkat, satu contoh konkret, `
+      + 'dan satu langkah lanjutan yang bisa dikerjakan hari ini.',
+    selesai: new Date().toISOString(),
   };
 }
 
@@ -64,38 +56,34 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, layanan: 'mock-kra', tugas: tugas.size, post: jumlahPost });
   }
 
-  if (url.pathname === '/' ) {
+  if (url.pathname === '/') {
     return json(res, 200, {
-      layanan: 'mock KRA (kantor-rama-ai)',
-      endpoint: ['GET /api/pilar-konten', 'POST /api/tugas', 'GET /api/tugas?status=selesai', 'POST /api/tugas/:id/selesai'],
+      layanan: 'mock KRA',
+      endpoint: ['POST /api/tugas', 'GET /api/tugas?status=selesai', 'POST /api/tugas/:id/selesai'],
       tugas: [...tugas.values()].map((t) => ({ id: t.task_id, status: t.status, judul: t.judul })),
     });
   }
 
-  if (url.pathname === '/api/pilar-konten' && req.method === 'GET') {
-    return json(res, 200, { ok: true, pilar: PILAR, diambil: new Date().toISOString() });
-  }
-
   if (url.pathname === '/api/tugas' && req.method === 'POST') {
     // body WAJIB dibaca dulu walau akan membalas gagal, supaya koneksi keep-alive tidak kacau
-    const payload = await body(req);
+    const payload = await bacaBody(req);
     jumlahPost++;
     if (jumlahPost <= FAIL_FIRST) {
-      return json(res, 503, { ok: false, error: 'agen Wowo sedang sibuk (simulasi gagal)' });
+      return json(res, 503, { ok: false, error: 'agen sedang sibuk (simulasi gagal)' });
     }
     const task_id = 'T' + (nextId++);
     const item = {
       task_id,
       status: 'diproses',
-      agen: payload.agen || 'wowo',
-      pilar: payload.pilar || 'Umum',
+      agen: payload.agen || 'agen-1',
       judul: payload.judul || '',
       prompt: payload.prompt || '',
+      meta: payload.meta || {},
       dibuat: new Date().toISOString(),
       selesai_pada: new Date(Date.now() + DURASI_MS).toISOString(),
     };
     tugas.set(task_id, item);
-    console.log(`[mock-kra] POST /api/tugas -> ${task_id} (${item.pilar})`);
+    console.log(`[mock-kra] POST /api/tugas -> ${task_id} (${item.agen})`);
     return json(res, 202, { ok: true, task_id, status: item.status, diterima: item.dibuat });
   }
 
@@ -105,7 +93,7 @@ const server = http.createServer(async (req, res) => {
     const now = Date.now();
     for (const t of tugas.values()) {
       if (t.status === 'diproses' && Date.parse(t.selesai_pada) <= now) {
-        Object.assign(t, ideUntuk(t), { status: 'selesai', selesai: new Date().toISOString() });
+        Object.assign(t, hasilUntuk(t), { status: 'selesai', selesai: new Date().toISOString() });
       }
     }
     let items = [...tugas.values()];
@@ -118,7 +106,7 @@ const server = http.createServer(async (req, res) => {
   if (selesai && req.method === 'POST') {
     const t = tugas.get(selesai[1]);
     if (!t) return json(res, 404, { ok: false, error: 'tugas tidak ada' });
-    Object.assign(t, ideUntuk(t), { status: 'selesai', selesai: new Date().toISOString() });
+    Object.assign(t, hasilUntuk(t), { status: 'selesai', selesai: new Date().toISOString() });
     return json(res, 200, { ok: true, tugas: t });
   }
 
@@ -131,4 +119,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, PILAR };
+module.exports = { server };

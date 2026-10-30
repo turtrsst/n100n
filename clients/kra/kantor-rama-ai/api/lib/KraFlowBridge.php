@@ -2,31 +2,35 @@
 declare(strict_types=1);
 
 /**
- * KraWowoBridge — sisi KRA yang dipanggil Workflow WOWO (n100n).
+ * KraFlowBridge — sisi KRA untuk workflow n100n (generik, bukan alur tertentu).
  *
- * Endpoint (lihat api/index.php):
- *   GET  ?action=wowo-pilar            -> daftar pilar konten
- *   POST ?action=wowo-tugas            -> Wowo menerima tugas  (dipanggil n100n)
- *   GET  ?action=wowo-tugas&status=... -> daftar tugas + ide
- *   POST ?action=wowo-selesai          -> tandai selesai + isi ide (kalau manual)
+ * Endpoint (didaftarkan di api/index.php):
+ *   POST ?action=flow-tugas              -> terima tugas dari n100n
+ *   GET  ?action=flow-tugas&status=...   -> daftar tugas + hasil
+ *   POST ?action=flow-selesai            -> tandai selesai + isi hasil (mode manual)
+ *   GET  ?action=flow-status             -> ringkasan
  *
- * Penyimpanan: <project>/.temp/wowo.json (flock, tanpa MySQL) — mengikuti pola
+ * Penyimpanan: <project>/.temp/flow.json (flock, tanpa MySQL) — mengikuti pola
  * KraTaskEngine supaya tetap jalan walau MySQL XAMPP mati.
  *
- * Mode menghasilkan ide (env KRA_WOWO_MODE):
- *   template (default) : ide contoh deterministik, alur langsung selesai — untuk uji
+ * Mode menghasilkan hasil (env KRA_FLOW_MODE):
+ *   template (default) : ringkasan deterministik, tugas langsung selesai — untuk uji
  *   agent              : pakai KraAgentChat (model AI KRA), gagal -> template
- *   manual             : biarkan "diproses" sampai ada POST wowo-selesai
+ *   manual             : tetap "diproses" sampai ada POST flow-selesai
  *
- * Generator kustom: KraWowoBridge::setGenerator(fn(array $tugas): string);
+ * Generator kustom: KraFlowBridge::setGenerator(fn(array $tugas): string);
+ *
+ * Kontrak ini sengaja longgar: payload bebas (meta apa pun disimpan apa adanya),
+ * jadi alur apa pun di n100n bisa memakai bridge ini sebagai antrean tugas.
  */
-final class KraWowoBridge
+final class KraFlowBridge
 {
-    private const DEFAULT_PILAR = [
-        ['id' => 1, 'nama' => 'Edukasi', 'deskripsi' => 'menjelaskan konsep ke pembaca awam'],
-        ['id' => 2, 'nama' => 'Studi Kasus', 'deskripsi' => 'cerita nyata dari lapangan'],
-        ['id' => 3, 'nama' => 'Tips Praktis', 'deskripsi' => 'langkah singkat yang bisa langsung dicoba'],
-        ['id' => 4, 'nama' => 'Opini', 'deskripsi' => 'sudut pandang penulis atas isu hangat'],
+    /** Kategori contoh; override lewat env KRA_FLOW_KATEGORI_FILE (JSON). */
+    private const DEFAULT_KATEGORI = [
+        ['id' => 1, 'nama' => 'Umum', 'deskripsi' => 'tugas tanpa kategori khusus'],
+        ['id' => 2, 'nama' => 'Riset', 'deskripsi' => 'mengumpulkan dan merangkum bahan'],
+        ['id' => 3, 'nama' => 'Tulis', 'deskripsi' => 'menyusun draf dari bahan yang ada'],
+        ['id' => 4, 'nama' => 'Cek', 'deskripsi' => 'meninjau ulang hasil sebelum dipakai'],
     ];
 
     /** @var callable|null */
@@ -49,7 +53,7 @@ final class KraWowoBridge
 
     private static function storagePath(): string
     {
-        return self::tempDir() . DIRECTORY_SEPARATOR . 'wowo.json';
+        return self::tempDir() . DIRECTORY_SEPARATOR . 'flow.json';
     }
 
     private static function load(): array
@@ -88,27 +92,31 @@ final class KraWowoBridge
         }
     }
 
-    // -------------------------------------------------------------- pilar
-    public static function pilarKonten(): array
+    // ------------------------------------------------------------- kategori
+    public static function kategori(): array
     {
-        $file = trim((string) getenv('KRA_WOWO_PILAR_FILE'));
+        $file = trim((string) getenv('KRA_FLOW_KATEGORI_FILE'));
         if ($file !== '' && is_file($file)) {
             $data = json_decode((string) file_get_contents($file), true);
             if (is_array($data)) {
-                $list = $data['pilar'] ?? $data;
+                $list = $data['kategori'] ?? $data;
                 if (is_array($list) && $list !== []) {
                     return array_values($list);
                 }
             }
         }
-        return self::DEFAULT_PILAR;
+        return self::DEFAULT_KATEGORI;
     }
 
-    // -------------------------------------------------------------- tugas
+    // --------------------------------------------------------------- tugas
+    /**
+     * Terima satu tugas dari n100n. Wajib ada `prompt`; `judul`, `agen`,
+     * `kategori`, dan field lain opsional (disimpan sebagai meta).
+     */
     public static function terimaTugas(array $payload): array
     {
         if (!self::authorized()) {
-            return ['ok' => false, 'error' => 'x-api-key tidak cocok (set KRA_WOWO_API_KEY / KRA_API_KEY).'];
+            return ['ok' => false, 'error' => 'x-api-key tidak cocok (set KRA_FLOW_API_KEY / KRA_API_KEY).'];
         }
         $prompt = trim((string) ($payload['prompt'] ?? ''));
         if ($prompt === '') {
@@ -119,25 +127,26 @@ final class KraWowoBridge
         $id = 'T' . (int) (++$data['counter']);
         $tugas = [
             'task_id' => $id,
-            'agen' => trim((string) ($payload['agen'] ?? 'wowo')) ?: 'wowo',
-            'pilar' => trim((string) ($payload['pilar'] ?? 'Umum')) ?: 'Umum',
-            'judul' => trim((string) ($payload['judul'] ?? '')) ?: ('Konten ' . $id),
+            'agen' => trim((string) ($payload['agen'] ?? 'agen-1')) ?: 'agen-1',
+            'kategori' => trim((string) ($payload['kategori'] ?? 'Umum')) ?: 'Umum',
+            'judul' => trim((string) ($payload['judul'] ?? '')) ?: ('Tugas ' . $id),
             'prompt' => $prompt,
             'gaya' => trim((string) ($payload['gaya'] ?? '')),
-            'jumlah_kata' => (int) ($payload['jumlah_kata'] ?? 300),
+            'maks_kata' => (int) ($payload['maks_kata'] ?? 0),
+            'meta' => is_array($payload['meta'] ?? null) ? $payload['meta'] : [],
             'status' => 'diproses',
             'dibuat' => gmdate('c'),
             'selesai' => null,
-            'ide' => null,
+            'hasil' => null,
             'mode' => null,
         ];
 
         $mode = self::mode();
         if ($mode !== 'manual') {
-            $hasil = self::generateIde($tugas, $mode);
-            $tugas['ide'] = $hasil['ide'];
+            $hasil = self::generateHasil($tugas, $mode);
+            $tugas['hasil'] = $hasil['hasil'];
             $tugas['mode'] = $hasil['mode'];
-            if (trim((string) $hasil['ide']) !== '') {
+            if (trim((string) $hasil['hasil']) !== '') {
                 $tugas['status'] = 'selesai';
                 $tugas['selesai'] = gmdate('c');
             }
@@ -154,13 +163,18 @@ final class KraWowoBridge
         ];
     }
 
-    public static function daftarTugas(?string $status = null, int $limit = 50): array
+    public static function daftarTugas(?string $status = null, int $limit = 50, ?string $agen = null): array
     {
         $data = self::load();
         $items = array_values($data['tugas']);
         if ($status !== null && $status !== '') {
             $items = array_values(array_filter($items, static function (array $t) use ($status): bool {
                 return (string) ($t['status'] ?? '') === $status;
+            }));
+        }
+        if ($agen !== null && $agen !== '') {
+            $items = array_values(array_filter($items, static function (array $t) use ($agen): bool {
+                return (string) ($t['agen'] ?? '') === $agen;
             }));
         }
         usort($items, static function (array $a, array $b): int {
@@ -175,21 +189,21 @@ final class KraWowoBridge
         return $data['tugas'][$id] ?? null;
     }
 
-    public static function selesaikan(string $id, string $ide, array $meta = []): array
+    public static function selesaikan(string $id, string $hasil, array $meta = []): array
     {
         if (!self::authorized()) {
-            return ['ok' => false, 'error' => 'x-api-key tidak cocok (set KRA_WOWO_API_KEY / KRA_API_KEY).'];
+            return ['ok' => false, 'error' => 'x-api-key tidak cocok (set KRA_FLOW_API_KEY / KRA_API_KEY).'];
         }
-        $ide = trim($ide);
-        if ($ide === '') {
-            return ['ok' => false, 'error' => 'ide wajib diisi'];
+        $hasil = trim($hasil);
+        if ($hasil === '') {
+            return ['ok' => false, 'error' => 'hasil wajib diisi'];
         }
         $data = self::load();
         if (!isset($data['tugas'][$id])) {
             return ['ok' => false, 'error' => 'tugas tidak ditemukan: ' . $id];
         }
         $data['tugas'][$id] = array_merge($data['tugas'][$id], [
-            'ide' => $ide,
+            'hasil' => $hasil,
             'status' => 'selesai',
             'selesai' => gmdate('c'),
             'mode' => (string) ($meta['mode'] ?? 'manual'),
@@ -219,7 +233,7 @@ final class KraWowoBridge
         ];
     }
 
-    // -------------------------------------------------------------- akses
+    // ---------------------------------------------------------------- akses
     public static function authorized(): bool
     {
         $expected = self::apiKey();
@@ -251,23 +265,23 @@ final class KraWowoBridge
 
     private static function apiKey(): string
     {
-        return trim((string) (getenv('KRA_WOWO_API_KEY') ?: getenv('KRA_API_KEY') ?: ''));
+        return trim((string) (getenv('KRA_FLOW_API_KEY') ?: getenv('KRA_API_KEY') ?: ''));
     }
 
     private static function mode(): string
     {
-        $mode = strtolower(trim((string) (getenv('KRA_WOWO_MODE') ?: 'template')));
+        $mode = strtolower(trim((string) (getenv('KRA_FLOW_MODE') ?: 'template')));
         return in_array($mode, ['template', 'agent', 'manual'], true) ? $mode : 'template';
     }
 
-    // ---------------------------------------------------------- generator
-    private static function generateIde(array $tugas, string $mode): array
+    // ------------------------------------------------------------ generator
+    private static function generateHasil(array $tugas, string $mode): array
     {
         if (is_callable(self::$generator)) {
             try {
-                $ide = trim((string) call_user_func(self::$generator, $tugas));
-                if ($ide !== '') {
-                    return ['ide' => $ide, 'mode' => 'custom'];
+                $hasil = trim((string) call_user_func(self::$generator, $tugas));
+                if ($hasil !== '') {
+                    return ['hasil' => $hasil, 'mode' => 'custom'];
                 }
             } catch (Throwable $e) {
                 // lanjut ke mode bawaan
@@ -276,33 +290,33 @@ final class KraWowoBridge
 
         if ($mode === 'agent' && class_exists('KraAgentChat')) {
             try {
-                $agentId = trim((string) (getenv('KRA_WOWO_AGENT') ?: 'rama'));
+                $agentId = trim((string) (getenv('KRA_FLOW_AGENT') ?: 'rama'));
                 $reply = KraAgentChat::dispatch([
-                    'channel' => 'wowo',
+                    'channel' => 'flow',
                     'agentId' => $agentId,
                     'message' => (string) ($tugas['prompt'] ?? ''),
                 ]);
                 $isi = trim((string) ($reply['message'] ?? ''));
                 if ($isi !== '') {
-                    return ['ide' => $isi, 'mode' => 'agent'];
+                    return ['hasil' => $isi, 'mode' => 'agent'];
                 }
             } catch (Throwable $e) {
                 // jatuh ke template di bawah
             }
         }
 
-        return ['ide' => self::templateIde($tugas), 'mode' => 'template'];
+        return ['hasil' => self::templateHasil($tugas), 'mode' => 'template'];
     }
 
-    private static function templateIde(array $tugas): string
+    private static function templateHasil(array $tugas): string
     {
-        $pilar = (string) ($tugas['pilar'] ?? 'Umum');
-        $judul = (string) ($tugas['judul'] ?? 'Ide baru');
+        $kategori = (string) ($tugas['kategori'] ?? 'Umum');
+        $judul = (string) ($tugas['judul'] ?? 'Tugas');
         $gaya = (string) ($tugas['gaya'] ?? '');
-        $kata = (int) ($tugas['jumlah_kata'] ?? 300);
-        return '[' . $pilar . '] ' . $judul . ': mulai dari pertanyaan yang paling sering ditanya, '
-            . 'bongkar satu mitos yang beredar, lalu tutup dengan satu langkah praktis yang bisa dicoba hari ini.'
+        $kata = (int) ($tugas['maks_kata'] ?? 0);
+        return '[' . $kategori . '] ' . $judul . ': ringkasan singkat, satu contoh konkret, '
+            . 'dan satu langkah lanjutan yang bisa dikerjakan hari ini.'
             . ($gaya !== '' ? ' Gaya: ' . $gaya . '.' : '')
-            . ' Target sekitar ' . $kata . ' kata.';
+            . ($kata > 0 ? ' Sekitar ' . $kata . ' kata.' : '');
     }
 }

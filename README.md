@@ -4,13 +4,15 @@ Engine automasi mandiri, zero dependency: Node.js built-in `http`, `sqlite`, `vm
 Tanpa Docker, tanpa `npm install`. Menjalankan workflow bergaya n8n — termasuk
 **percabangan (if/else), loop, sheet, webhook, scheduler, dan sub-workflow**.
 
-Versi 1.1: engine sudah berbasis **graf** (node + `next`), jadi alur seperti
-`Workflow WOWO` (kirim tugas → tunggu → cek hasil → ulang) bisa dijalankan.
+Engine berbasis **graf** (node + `next`): percabangan, loop, tunggu, HTTP dengan
+retry, sheet, webhook, scheduler, sub-workflow. **Alurnya Anda rakit sendiri** —
+`workflows/` hanya berisi contoh pola, bukan alur jadi milik siapa pun.
 
-- [`docs/WOWO-WORKFLOW.md`](docs/WOWO-WORKFLOW.md) — pemetaan 1:1 dari screenshot n8n.
+- [`docs/MEMBUAT-ALUR-SENDIRI.md`](docs/MEMBUAT-ALUR-SENDIRI.md) — resep pola:
+  cabang, loop-polling, HTTP tahan gangguan, sheet, webhook, scheduler.
 - [`docs/KRA-INTEGRATION.md`](docs/KRA-INTEGRATION.md) — kontrak dua arah dengan kantor-rama-ai.
 - [`clients/kra/kantor-rama-ai`](clients/kra/kantor-rama-ai) — kelas PHP + patch siap
-  tempel di repo KRA (`git apply patches/0001-n100n-wowo-integration.patch`).
+  tempel di repo KRA (`git apply patches/0001-n100n-flow-bridge.patch`).
 
 ## Jalankan
 
@@ -20,8 +22,10 @@ node --env-file=.env server.js
 ```
 
 Buka `http://localhost:5679`. Password admin ada di `.env` (`APP_PASSWORD`). Data di `data\n100n.db`.
-Saat pertama kali dijalankan, workflow contoh `workflows/wowo.json` otomatis dimuat
-(mematikan: `APP_SEED=0`).
+Saat pertama kali dijalankan (database kosong), semua file `workflows/*.json`
+dimuat sebagai contoh: `contoh-alur-polling.json` (kirim tugas → tunggu → cek
+hasil → simpan) dan `contoh-webhook.json` (terima → olah → balas).
+Matikan dengan `APP_SEED=0`, atau hapus saja contohnya dari UI.
 
 Autostart saat boot (jalankan CMD sebagai Administrator, sekali saja):
 
@@ -149,9 +153,9 @@ curl -H "x-api-key: TOKEN" "http://localhost:5679/api/executions?workflow_id=1"
 ## Testing
 
 ```bat
-npm test                 :: seluruh test (engine, API, dan WOWO end-to-end)
+npm test                 :: seluruh test (engine, API, dan contoh alur end-to-end)
 node examples/mock-kra.js :: tiruan API KRA untuk uji lokal
-npm run smoke            :: WOWO end-to-end melawan mock
+npm run smoke            :: contoh alur end-to-end melawan mock KRA
 ```
 
 Tidak ada dependency: cukup Node 22.5+ (`node:sqlite`).

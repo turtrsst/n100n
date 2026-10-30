@@ -10,9 +10,9 @@ function setupEnv() {
   process.env.APP_PASSWORD = 'rahasia123';
   process.env.APP_API_TOKEN = 'tok-test';
   process.env.APP_SEED = '0';
-  process.env.WOWO_SHEET_DRIVER = 'csv';
-  process.env.WOWO_TOPIC_CSV = path.join(tmp, 'topik.csv');
-  process.env.WOWO_IDE_CSV = path.join(tmp, 'ide.csv');
+  process.env.CONTOH_SHEET_DRIVER = 'csv';
+  process.env.CONTOH_SUMBER_CSV = path.join(tmp, 'sumber.csv');
+  process.env.CONTOH_HASIL_CSV = path.join(tmp, 'hasil.csv');
   process.env.MOCK_KRA_KEY = 'dev-kra-key';
   process.env.KRA_API_KEY = 'dev-kra-key';
   return tmp;

@@ -406,20 +406,24 @@ function startScheduler(intervalMs = 20000) {
 }
 
 // ---------- seed workflow contoh ----------
+// Semua file workflows/*.json dimuat saat database masih kosong.
 function seedIfEmpty() {
-  if (!SEED) return null;
-  if (store.db.prepare('SELECT COUNT(*) c FROM workflows').get().c > 0) return null;
-  const file = path.join(ROOT, 'workflows', 'wowo.json');
-  if (!fs.existsSync(file)) return null;
-  try {
-    const wf = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const created = store.createWorkflow(wf);
-    console.log(`seed: workflow "${created.name}" (#${created.id}) dimuat dari workflows/wowo.json`);
-    return created;
-  } catch (e) {
-    console.error('seed gagal:', e.message);
-    return null;
+  if (!SEED) return [];
+  if (store.db.prepare('SELECT COUNT(*) c FROM workflows').get().c > 0) return [];
+  const dir = path.join(ROOT, 'workflows');
+  if (!fs.existsSync(dir)) return [];
+  const dimuat = [];
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
+    try {
+      const wf = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+      const created = store.createWorkflow(wf);
+      dimuat.push(created);
+      console.log(`seed: "${created.name}" (#${created.id}) dari workflows/${file}`);
+    } catch (e) {
+      console.error('seed gagal (' + file + '):', e.message);
+    }
   }
+  return dimuat;
 }
 
 function bootstrap() {

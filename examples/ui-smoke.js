@@ -15,7 +15,7 @@ try {
 
 const file = path.join(__dirname, '..', 'public', 'index.html');
 const html = fs.readFileSync(file, 'utf8');
-const wf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'workflows', 'wowo.json'), 'utf8'));
+const wf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'workflows', 'contoh-alur-polling.json'), 'utf8'));
 
 const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost:5679/' });
 const { window } = dom;
@@ -41,20 +41,20 @@ setTimeout(() => {
 
   const ifElse = cards.find((c) => c.querySelector('select[data-f=type]').value === 'ifElse');
   const rows = [...ifElse.querySelectorAll('.conn-row')].map((r) => r.querySelector('input.out').value + '→' + r.querySelector('select').value);
-  cek('editor koneksi ifElse terbaca', rows.join(',') === 'true→n9,false→n10', rows.join(', '));
+  cek('editor koneksi ifElse terbaca', rows.join(',') === 'true→n8,false→n9', rows.join(', '));
 
   const sel = ifElse.querySelector('.conn-row select');
-  sel.value = 'n14';
+  sel.value = 'n12';
   sel.dispatchEvent(new window.Event('change'));
-  cek('ubah target cabang tersimpan', window.__t.state.wf.nodes.find((n) => n.id === 'n8').next.true === 'n14');
+  cek('ubah target cabang tersimpan', window.__t.state.wf.nodes.find((n) => n.id === 'n7').next.true === 'n12');
 
   ifElse.querySelector('[data-a=auto]').click();
-  cek('tombol Otomatis menghapus next', window.__t.state.wf.nodes.find((n) => n.id === 'n8').next === undefined);
+  cek('tombol Otomatis menghapus next', window.__t.state.wf.nodes.find((n) => n.id === 'n7').next === undefined);
   ifElse.querySelector('[data-a=manual]').click();
-  cek('tombol Atur manual membuat koneksi', !!window.__t.state.wf.nodes.find((n) => n.id === 'n8').next);
+  cek('tombol Atur manual membuat koneksi', !!window.__t.state.wf.nodes.find((n) => n.id === 'n7').next);
 
   window.__t.applyRuns([
-    { id: 'n1', visit: 1, ms: 0 }, { id: 'n10', visit: 2, ms: 9 }, { id: 'n14', visit: 1, ms: 1, error: 'boom' },
+    { id: 'n1', visit: 1, ms: 0 }, { id: 'n9', visit: 2, ms: 9 }, { id: 'n13', visit: 1, ms: 1, error: 'boom' },
   ]);
   const svg = doc.getElementById('graph').innerHTML;
   cek('graf punya kotak node', (svg.match(/class="gnode/g) || []).length === wf.nodes.length);
@@ -67,8 +67,11 @@ setTimeout(() => {
 
   doc.getElementById('wfTrigger').value = 'schedule';
   window.__t.renderTriggerFields();
+  doc.getElementById('cbMode').value = 'weekly';
+  doc.getElementById('cbMode').dispatchEvent(new window.Event('change'));
   const senin = [...doc.querySelectorAll('[data-day]')].find((c) => c.dataset.day === '1');
   cek('form trigger mingguan menandai Senin', senin && senin.checked);
+  cek('form trigger punya input jam', !!doc.getElementById('cbAt'));
 
   cek('layar login aktif saat belum auth', !doc.getElementById('login').classList.contains('hidden'));
 

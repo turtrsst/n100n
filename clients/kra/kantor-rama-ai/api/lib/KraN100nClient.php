@@ -77,7 +77,7 @@ final class KraN100nClient
         return self::request('POST', '/api/workflows/' . $id . '/run', ['items' => $items], $timeoutSeconds);
     }
 
-    /** Jalankan di latar belakang; cocok untuk WOWO yang berisi node wait panjang. */
+    /** Jalankan di latar belakang; cocok untuk alur yang berisi node wait panjang. */
     public static function runAsync(int $id, array $items = [[]]): array
     {
         return self::request('POST', '/api/workflows/' . $id . '/run?async=1', ['items' => $items], 15);

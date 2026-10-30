@@ -1,5 +1,5 @@
 'use strict';
-// smoke: jalankan Workflow WOWO end-to-end melawan mock KRA (wait dipersingkat)
+// smoke: jalankan contoh alur end-to-end melawan mock KRA (wait dipersingkat)
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,11 +12,11 @@ process.env.APP_SEED = '0';
 process.env.MOCK_TUGAS_FAIL = '2';
 process.env.MOCK_TUGAS_MS = '300';
 
-const topikCsv = path.join(tmp, 'topik.csv');
-fs.writeFileSync(topikCsv, 'topik,pilar,dibuat\nEdukasi #1,Edukasi,2026-10-01\nEdukasi #2,Edukasi,2026-10-08\n');
-process.env.WOWO_SHEET_DRIVER = 'csv';
-process.env.WOWO_TOPIC_CSV = topikCsv;
-process.env.WOWO_IDE_CSV = path.join(tmp, 'ide.csv');
+const sumberCsv = path.join(tmp, 'sumber.csv');
+fs.writeFileSync(sumberCsv, 'catatan,dibuat\nCatatan #1,2026-10-01\nCatatan #2,2026-10-08\n');
+process.env.CONTOH_SHEET_DRIVER = 'csv';
+process.env.CONTOH_SUMBER_CSV = sumberCsv;
+process.env.CONTOH_HASIL_CSV = path.join(tmp, 'hasil.csv');
 
 const { server: kra } = require('../examples/mock-kra.js');
 const n100n = require('../server.js');
@@ -31,7 +31,7 @@ const n100n = require('../server.js');
   const base = 'http://127.0.0.1:' + n100n.server.address().port;
   const headers = { 'x-api-key': 'tok-test', 'Content-Type': 'application/json' };
 
-  const tpl = JSON.parse(fs.readFileSync(path.join(__dirname, '../workflows/wowo.json'), 'utf8'));
+  const tpl = JSON.parse(fs.readFileSync(path.join(__dirname, '../workflows/contoh-alur-polling.json'), 'utf8'));
   for (const node of tpl.nodes) {
     if (node.type === 'wait') node.config.ms = 150;
   }
@@ -45,8 +45,8 @@ const n100n = require('../server.js');
   (res.log || []).forEach((l) => console.log(' ', l));
   console.log('--- output ---');
   console.log(JSON.stringify(res.items, null, 2));
-  console.log('--- ide.csv ---');
-  try { console.log(fs.readFileSync(process.env.WOWO_IDE_CSV, 'utf8')); } catch (e) { console.log('(kosong)', e.code); }
+  console.log('--- hasil.csv ---');
+  try { console.log(fs.readFileSync(process.env.CONTOH_HASIL_CSV, 'utf8')); } catch (e) { console.log('(kosong)', e.code); }
 
   n100n.server.close();
   kra.close();

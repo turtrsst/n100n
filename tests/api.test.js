@@ -146,7 +146,7 @@ test('webhook: token, method, aktif/nonaktif, dan respond', async () => {
 
 test('import dan export definisi workflow', async () => {
   const definisi = {
-    name: 'impor wowo mini',
+    name: 'impor contoh mini',
     trigger: 'manual',
     nodes: [{ id: 'a', type: 'noop', config: {}, next: null }],
   };
@@ -156,7 +156,7 @@ test('import dan export definisi workflow', async () => {
 
   const exp = await call(base, 'GET', `/api/workflows/${imp.data.created[0].id}/export`, { token: TOKEN });
   assert.strictEqual(exp.status, 200);
-  assert.strictEqual(exp.data.name, 'impor wowo mini');
+  assert.strictEqual(exp.data.name, 'impor contoh mini');
   assert.ok(Array.isArray(exp.data.nodes));
   assert.strictEqual(exp.data.last_run, undefined, 'metadata runtime tidak ikut diexport');
 });

@@ -1,0 +1,44 @@
+{
+  "name": "Contoh: Webhook (dipanggil app lain)",
+  "active": false,
+  "trigger": "webhook",
+  "trigger_cfg": {
+    "path": "contoh",
+    "method": "POST",
+    "wait": true
+  },
+  "settings": {},
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "webhook",
+      "name": "Terima Webhook",
+      "config": {},
+      "next": "n2"
+    },
+    {
+      "id": "n2",
+      "type": "code",
+      "name": "Ambil Body",
+      "config": {
+        "code": "const body = ($json.body && typeof $json.body === 'object') ? $json.body : {};\nreturn [{ diterima: new Date().toISOString(), data: body, jumlah_field: Object.keys(body).length }];"
+      },
+      "next": "n3"
+    },
+    {
+      "id": "n3",
+      "type": "respond",
+      "name": "Balas",
+      "config": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "diterima": "{{ $json.diterima }}",
+          "jumlah_field": "{{ $json.jumlah_field }}",
+          "data": "{{ $json.data }}"
+        }
+      },
+      "next": null
+    }
+  ]
+}
