@@ -110,10 +110,26 @@ async function handleWebhook(req, res, url) {
     path: p,
   }];
 
+  // Jalankan di latar belakang, tapi tetap kembalikan execution_id supaya bisa dipantau
+  // (KRA memakainya untuk poll /api/executions/:id).
+  const jalanLatar = async () => {
+    let execId = 0;
+    let selesaiId;
+    const dapatId = new Promise((r) => { selesaiId = r; });
+    engine
+      .runWorkflow(wf, items, 'webhook', 0, { onStart: (id) => { execId = id; selesaiId(id); } })
+      .catch((e) => console.error('webhook run:', e.message));
+    await Promise.race([dapatId, new Promise((r) => setTimeout(r, 2000))]);
+    return execId;
+  };
+
   const wantWait = url.searchParams.get('wait') === '1' || wf.trigger_cfg.wait;
   if (url.searchParams.get('async') === '1' && !wantWait) {
-    engine.runWorkflow(wf, items, 'webhook').catch((e) => console.error('webhook run:', e.message));
-    return send(res, 202, { ok: true, accepted: true });
+    const execId = await jalanLatar();
+    return send(res, 202, {
+      ok: true, accepted: true, execution_id: execId || undefined,
+      poll: execId ? '/api/executions/' + execId + '?wait=1' : undefined,
+    });
   }
   if (wantWait) {
     const result = await engine.runWorkflow(wf, items, 'webhook');
@@ -123,8 +139,11 @@ async function handleWebhook(req, res, url) {
     if (result.response) return send(res, result.response.status || 200, result.response.body);
     return send(res, 200, { ok: true, execution_id: result.execution_id, output: result.items });
   }
-  engine.runWorkflow(wf, items, 'webhook').catch((e) => console.error('webhook run:', e.message));
-  return send(res, 202, { ok: true, accepted: true });
+  const execId = await jalanLatar();
+  return send(res, 202, {
+    ok: true, accepted: true, execution_id: execId || undefined,
+    poll: execId ? '/api/executions/' + execId + '?wait=1' : undefined,
+  });
 }
 
 // ---------- REST API ----------

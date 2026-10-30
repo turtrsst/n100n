@@ -144,6 +144,54 @@ test('webhook: token, method, aktif/nonaktif, dan respond', async () => {
   assert.strictEqual(nonaktif.status, 404);
 });
 
+test('webhook tanpa wait: 202 + execution_id yang bisa dipantau', async () => {
+  const wf = store.createWorkflow({
+    name: 'hook-async',
+    active: 1,
+    trigger: 'webhook',
+    trigger_cfg: { path: 'hook-async', method: 'POST', wait: false },
+    nodes: [
+      { id: 'a', type: 'wait', config: { ms: 120 }, next: 'b' },
+      { id: 'b', type: 'code', config: { code: 'return [{ selesai: true }];' }, next: null },
+    ],
+  });
+
+  const res = await fetch(base + '/webhook/hook-async', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ x: 1 }),
+  });
+  const data = await res.json();
+  assert.strictEqual(res.status, 202);
+  assert.ok(data.execution_id > 0, 'execution_id harus ada agar KRA bisa poll');
+  assert.strictEqual(data.poll, '/api/executions/' + data.execution_id + '?wait=1');
+
+  const pantau = await call(base, 'GET', `/api/executions/${data.execution_id}?wait=1&timeoutMs=5000`, { token: TOKEN });
+  assert.strictEqual(pantau.status, 200);
+  assert.strictEqual(pantau.data.status, 'success');
+  assert.strictEqual(pantau.data.output[0].selesai, true);
+  store.updateWorkflow(wf.id, { active: false });
+});
+
+test('sheet csv tulis: header ditulis dari columns', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const file = path.join(os.tmpdir(), 'n100n-sheet-' + Date.now() + '.csv');
+
+  const wf = store.createWorkflow({
+    name: 'sheet-write',
+    nodes: [
+      {
+        id: 'a', type: 'sheet', next: null,
+        config: { driver: 'csv', action: 'write', path: file, columns: ['n', 'k'], rows: [{ n: 1, k: 'a' }] },
+      },
+    ],
+  });
+  const run = await call(base, 'POST', `/api/workflows/${wf.id}/run`, { token: TOKEN, body: { items: [{}] } });
+  assert.strictEqual(run.data.status, 'success', JSON.stringify(run.data.error || ''));
+  assert.deepStrictEqual(fs.readFileSync(file, 'utf8').trim().split('\n'), ['n,k', '1,a']);
+  fs.unlinkSync(file);
+});
+
 test('import dan export definisi workflow', async () => {
   const definisi = {
     name: 'impor contoh mini',

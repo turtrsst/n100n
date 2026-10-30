@@ -26,6 +26,8 @@ Saat pertama kali dijalankan (database kosong), semua file `workflows/*.json`
 dimuat sebagai contoh: `contoh-alur-polling.json` (kirim tugas → tunggu → cek
 hasil → simpan) dan `contoh-webhook.json` (terima → olah → balas).
 Matikan dengan `APP_SEED=0`, atau hapus saja contohnya dari UI.
+Contoh webhook dimuat **nonaktif** — nyalakan toggle **Aktif** dulu, kalau tidak
+`/webhook/contoh` menjawab 404.
 
 Autostart saat boot (jalankan CMD sebagai Administrator, sekali saja):
 

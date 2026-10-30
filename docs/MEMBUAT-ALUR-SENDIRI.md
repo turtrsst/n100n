@@ -73,6 +73,11 @@ Beri penjaga supaya tidak berputar selamanya — dua cara:
 
 ### c. HTTP yang tahan gangguan
 
+Perhatikan: secara default node `http` mengirim **satu** request memakai item
+pertama (cocok untuk "ambil data sekali"). Kalau Anda ingin satu request per
+item — seperti node HTTP di n8n — set `"each": true` (opsional `delayMs`).
+
+
 ```json
 { "type": "http", "config": {
     "method": "POST",
@@ -82,6 +87,7 @@ Beri penjaga supaya tidak berputar selamanya — dua cara:
     "retry": 2,              // 5xx/429 & error jaringan diulang dengan backoff
     "retryDelayMs": 1000,
     "allowNon2xx": true,     // gagal -> item {error, status, body}, alur lanjut
+    "each": true,            // satu request per item (default: sekali, pakai item pertama)
     "split": "$json.items",  // pecah balasan jadi banyak item
     "keepEmpty": true        // tetap kirim 1 item kosong walau hasilnya nol
 } }
@@ -115,6 +121,12 @@ Driver `google` memakai service account (`GOOGLE_SA_JSON`), tanpa dependency.
 
 Data masuk: `$json.body`, `$json.query`, `$json.headers`, `$json.method`.
 Pakai node `respond` untuk menentukan status + body balasan.
+
+Webhook hanya hidup kalau workflow **aktif** (`active`) — contoh
+`contoh-webhook.json` sengaja dimuat nonaktif. Nyalakan lewat toggle **Aktif** di
+UI (atau `POST /api/workflows/:id/toggle`), kalau tidak `POST /webhook/contoh`
+menjawab 404. Tambahkan `token` bila endpoint terbuka ke jaringan (kalau tidak,
+siapa pun yang tahu URL bisa memicunya).
 
 ### f. Berkala (scheduler)
 
