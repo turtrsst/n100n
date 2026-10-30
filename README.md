@@ -30,6 +30,13 @@ Ada dua tab di header:
   **Buka**/**Run**, dan 8 eksekusi terakhir (klik untuk detail). Diperbarui
   otomatis tiap 5 detik; datanya dari `GET /api/stats`.
 - **Editor** — kanvas graf, editor node/koneksi, run manual, log live, riwayat.
+Untuk contoh pertama, siapkan sheet sumbernya (dipakai `contoh-alur-polling.json`):
+
+```bat
+mkdir files
+copy examples\sumber.csv files\sumber.csv
+```
+
 Saat pertama kali dijalankan (database kosong), semua file `workflows/*.json`
 dimuat sebagai contoh: `contoh-alur-polling.json` (kirim tugas → tunggu → cek
 hasil → simpan) dan `contoh-webhook.json` (terima → olah → balas).

@@ -113,6 +113,11 @@ item — seperti node HTTP di n8n — set `"each": true` (opsional `delayMs`).
 
 Driver `google` memakai service account (`GOOGLE_SA_JSON`), tanpa dependency.
 
+Catatan: kalau sheet kosong / file belum ada, node menghasilkan **0 item** dan
+alur berhenti di situ (sama seperti n8n: cabang tanpa item tidak diteruskan).
+Untuk contoh polling, siapkan dulu `files/sumber.csv`
+(`copy examples\sumber.csv files\sumber.csv`).
+
 ### e. Menerima panggilan dari app KRA (webhook)
 
 ```json
