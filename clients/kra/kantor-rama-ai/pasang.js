@@ -58,6 +58,7 @@ if (!fs.existsSync(indexPath)) {
   process.exit(1);
 }
 const indexAsli = fs.readFileSync(indexPath, 'utf8');
+const EOL = indexAsli.includes('\r\n') ? '\r\n' : '\n';
 if (!/function\s+respond\s*\(/.test(indexAsli)) {
   gagal('api/index.php tidak punya function respond() — versi KRA ini belum didukung.');
   process.exit(1);
@@ -112,14 +113,15 @@ if (!fs.existsSync(SNIP)) {
     gagal("tidak menemukan variabel $available sebagai titik sisip blok action");
   } else {
     const blok = fs.readFileSync(SNIP, 'utf8').replace(/\s*$/, '\n') + '\n';
-    index = index.slice(0, penanda.index) + blok + index.slice(penanda.index);
+    const blokEol = EOL === '\n' ? blok : blok.replace(/\r?\n/g, EOL);
+    index = index.slice(0, penanda.index) + blokEol + index.slice(penanda.index);
     ubah('8 action baru disisipkan sebelum $available');
   }
 }
 
 // ---------- 4. daftar action di pesan 404 ----------
 if (AKSI_BARU.every((a) => index.includes(a))) {
-  const stmt = index.match(/\$available\s*=\s*([\s\S]*?);\n/);
+  const stmt = index.match(/\$available\s*=\s*([\s\S]*?);\r?\n/);
   if (stmt) {
     const literal = stmt[1].match(/'(?:[^'\\]|\\.)*'/g) || [];
     const isi = literal.map((l) => l.slice(1, -1)).join('').replace(/\.\s*$/, '');
@@ -138,7 +140,7 @@ if (AKSI_BARU.every((a) => index.includes(a))) {
       potong.push(sisa);
       const baru_stmt = '$available = ' + potong
         .map((p, i) => (i === 0 ? `'${p.replace(/'/g, "\\'")}'` : `        . '${p.replace(/'/g, "\\'")}'`))
-        .join('\n') + ';\n';
+        .join(EOL) + ';' + EOL;
       index = index.slice(0, stmt.index) + baru_stmt + index.slice(stmt.index + stmt[0].length);
       ubah('daftar action di pesan 404 ditambah: ' + baru.join(', '));
     } else {
@@ -167,7 +169,7 @@ const cek = [
   ["action flow-tugas", final.includes("if ($action === 'flow-tugas')")],
   ["action flow-selesai", final.includes("if ($action === 'flow-selesai')")],
   ["action n100n-run", final.includes("if ($action === 'n100n-run')")],
-  ["$available diperbarui", /n100n-execution/.test((final.match(/\$available\s*=\s*([\s\S]*?);\n/) || ['', ''])[1])],
+  ["$available diperbarui", /n100n-execution/.test((final.match(/\$available\s*=\s*([\s\S]*?);\r?\n/) || ['', ''])[1])],
   ['blok action berada sebelum $available', final.indexOf("if ($action === 'flow-tugas')") < final.indexOf('$available =')],
   ['kurung kurawal seimbang (kasar)', (final.split('{').length - 1) === (final.split('}').length - 1)],
 ];
