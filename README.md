@@ -21,7 +21,7 @@ cd C:\xampp\htdocs\n100n
 node --env-file=.env server.js
 ```
 
-Buka `http://localhost:5679`. Password admin ada di `.env` (`APP_PASSWORD`). Data di `data\n100n.db`.
+Buka `http://localhost:5679`. Password awal admin adalah `123456` (kecuali `APP_PASSWORD` di `.env` diisi). Setelah login, ubah melalui tombol **Ganti password** di header. Password baru disimpan sebagai hash di database lokal `data\n100n.db` dan tetap berlaku setelah restart.
 
 Ada dua tab di header:
 
@@ -181,9 +181,10 @@ Tidak ada dependency: cukup Node 22.5+ (`node:sqlite`).
 ## Akses dari luar
 
 Aplikasi ini plain HTTP. Untuk webhook publik: `ngrok http 5679`.
-Batasi: password admin lemah = seluruh workflow bisa diubah siapa pun — ganti
-`APP_PASSWORD` di `.env` jadi panjang/acak, dan isi `APP_API_TOKEN`.
+Batasi: password admin lemah = seluruh workflow bisa diubah siapa pun. Password awal `123456` hanya untuk bootstrap — segera ganti lewat menu **Ganti password** dengan password yang unik dan kuat sebelum aplikasi dibuka ke jaringan. Isi juga `APP_API_TOKEN` untuk integrasi API.
 Login dibatasi 5 percobaan gagal per IP (60 detik).
+
+Jika terkunci dan perlu reset admin, tambahkan `APP_PASSWORD_RESET=1` ke `.env` lalu restart n100n. Password dikembalikan ke nilai `APP_PASSWORD` (atau `123456` jika kosong). **Segera hapus `APP_PASSWORD_RESET=1` setelah restart**, sebab selama flag tersimpan password akan di-reset setiap aplikasi dinyalakan. Sesi login lama otomatis tidak berlaku setelah password berubah.
 
 ## Update & backup
 

@@ -14,11 +14,12 @@ const { NODE_TYPES } = require('./lib/nodes');
 
 engine.setStore(store);
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const ROOT = __dirname;
 const PORT = Number(process.env.APP_PORT || 5679);
 const HOST = process.env.APP_HOST || '0.0.0.0';
-const PASSWORD = process.env.APP_PASSWORD || 'changeme';
+const INITIAL_PASSWORD = process.env.APP_PASSWORD || '123456';
+const PASSWORD_SETTING = 'admin_password';
 const SECRET = process.env.APP_SECRET || 'n100n-secret';
 const API_TOKEN = process.env.APP_API_TOKEN || '';
 const CORS_ORIGIN = process.env.APP_CORS_ORIGIN || '';
@@ -53,15 +54,42 @@ async function readBody(req, limitBytes = 5 * 1024 * 1024) {
 }
 
 // ---------- auth ----------
-const sessionToken = () => crypto.createHmac('sha256', SECRET).update(PASSWORD).digest('hex');
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+// Inisialisasi hanya sekali: password dari APP_PASSWORD (bila ada), atau 123456.
+// APP_PASSWORD_RESET=1 adalah sakelar pemulihan satu kali saat aplikasi dinyalakan.
+if (process.env.APP_PASSWORD_RESET === '1') {
+  store.setSetting(PASSWORD_SETTING, hashPassword(INITIAL_PASSWORD));
+  console.warn('PASSWORD DI-RESET. Hapus APP_PASSWORD_RESET dari .env sebelum restart berikutnya.');
+} else if (!store.getSetting(PASSWORD_SETTING)) {
+  store.setSetting(PASSWORD_SETTING, hashPassword(INITIAL_PASSWORD));
+}
+
+function passwordCredential() { return store.getSetting(PASSWORD_SETTING); }
+function checkPassword(given) {
+  const [, salt, expected] = String(passwordCredential() || '').split('$');
+  if (!salt || !expected || typeof given !== 'string') return false;
+  const actual = crypto.scryptSync(given, salt, 64);
+  const wanted = Buffer.from(expected, 'hex');
+  return actual.length === wanted.length && crypto.timingSafeEqual(actual, wanted);
+}
+const sessionToken = () => crypto.createHmac('sha256', SECRET).update(passwordCredential() || '').digest('hex');
 const parseCookies = (h = '') => Object.fromEntries(
   h.split(';').map((p) => p.trim().split('=')).filter((p) => p.length === 2).map(([k, v]) => [k, decodeURIComponent(v)])
 );
+function hasSession(req) {
+  const sid = parseCookies(req.headers.cookie || '').sid || '';
+  const expected = sessionToken();
+  const a = Buffer.from(sid);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 function authed(req) {
-  const cookies = parseCookies(req.headers.cookie || '');
-  if (cookies.sid && crypto.timingSafeEqual(Buffer.from(cookies.sid), Buffer.from(sessionToken()))) return true;
-  if (API_TOKEN && req.headers['x-api-key'] === API_TOKEN) return true;
-  return false;
+  return hasSession(req) || Boolean(API_TOKEN && req.headers['x-api-key'] === API_TOKEN);
 }
 
 // proteksi brute force login sederhana
@@ -77,13 +105,6 @@ function noteLoginFail(ip) {
   rec.count += 1;
   if (rec.count >= 5) { rec.until = Date.now() + 60000; rec.count = 0; }
   loginAttempts.set(ip, rec);
-}
-
-function checkPassword(given) {
-  const a = Buffer.from(String(given));
-  const b = Buffer.from(PASSWORD);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
 }
 
 // ---------- webhook ----------
@@ -336,6 +357,20 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (url.pathname === '/api/change-password' && req.method === 'POST') {
+      if (!hasSession(req)) return send(res, 401, { error: 'login diperlukan untuk mengganti password' });
+      const body = await readBody(req);
+      if (!checkPassword(body.currentPassword)) return send(res, 401, { error: 'password saat ini salah' });
+      if (typeof body.newPassword !== 'string' || body.newPassword.length < 6 || body.newPassword.length > 128) {
+        return send(res, 400, { error: 'password baru harus 6–128 karakter' });
+      }
+      store.setSetting(PASSWORD_SETTING, hashPassword(body.newPassword));
+      loginAttempts.clear();
+      return send(res, 200, { ok: true }, {
+        'Set-Cookie': `sid=${sessionToken()}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`,
+      });
+    }
+
     if (url.pathname === '/api/logout') {
       return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; HttpOnly; Path=/; Max-Age=0' });
     }
@@ -452,8 +487,8 @@ function seedIfEmpty() {
 }
 
 function bootstrap() {
-  if (PASSWORD === 'changeme' || PASSWORD.length < 8) {
-    console.warn('PERINGATAN: APP_PASSWORD masih default/pendek. Ganti di .env sebelum dipakai di jaringan.');
+  if (checkPassword('123456') || (INITIAL_PASSWORD.length < 8 && checkPassword(INITIAL_PASSWORD))) {
+    console.warn('PERINGATAN: password admin masih default/pendek. Segera ganti dari menu Ganti password sebelum aplikasi dipakai di jaringan.');
   }
   if (!API_TOKEN) console.warn('PERINGATAN: APP_API_TOKEN kosong -> integrasi lewat API key tidak aktif.');
   seedIfEmpty();
